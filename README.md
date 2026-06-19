@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@6f70be3 -->
+<!-- docs: sync from coderbuzz/codex@888f7d5 -->
 
 # Proto — `@coderbuzz/proto`
 
@@ -269,13 +269,39 @@ These throw — the codec requires full type information for a deterministic wir
 
 ---
 
-## Performance
+## Benchmarks
 
-- **Smaller than JSON** — medium objects < 70% of JSON size
-- **Smaller than MessagePack** — no per-value type tags
-- **Pre-calculable size** — `size()` for buffer pre-allocation
-- **Compiled codecs** — encoder/decoder/sizer compiled from schema metadata once at `proto()` call time
-- **ASCII fast path** — short ASCII strings bypass `TextEncoder`/`TextDecoder`
+Full results at **[github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks)**.
+
+All tests on Apple M-series, Bun runtime.
+
+### Wire Size (nested object)
+
+| Format | Bytes | vs JSON |
+|---|---|---|
+| **@coderbuzz/proto** | **65** | **53% smaller** |
+| @coderbuzz/msgpack | 111 | 20% smaller |
+| JSON | 139 | — |
+
+### Encode Throughput (nested object)
+
+| Library | Ops/s | Factor |
+|---|---|---|
+| JSON.stringify | 5,097,684 | 1.0x |
+| **@coderbuzz/proto** | **4,365,748** | **1.2x slower** |
+| @coderbuzz/msgpack | 3,129,270 | 1.6x |
+| @msgpack/msgpack | 1,240,514 | 4.1x |
+
+### Decode Throughput (nested object)
+
+| Library | Ops/s | Factor |
+|---|---|---|
+| JSON.parse | 3,256,030 | 1.0x |
+| **@coderbuzz/proto** | **2,560,432** | **1.3x slower** |
+| @coderbuzz/msgpack | 1,486,442 | 2.2x |
+| @msgpack/msgpack | 1,044,493 | 3.1x |
+
+> Proto prioritizes **wire size** over raw throughput. Compared to JSON, payloads are 53% smaller for only 1.2–1.3x encode/decode overhead. Compared to other binary formats like MessagePack, proto is both **smaller and faster**.
 
 ---
 

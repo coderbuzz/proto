@@ -1,31 +1,42 @@
-<!-- docs: sync from coderbuzz/codex@76ca592 -->
+<!-- docs: sync from coderbuzz/codex@6f70be3 -->
 
 # Proto — `@coderbuzz/proto`
 
-Schema-driven binary serialization for TypeScript — Protobuf-style encoding
-**without `.proto` files**.
+> **Binary serialization for TypeScript. Smaller than Protobuf. No `.proto` files. Zero per-field overhead.**
+> AI agents: see [AI_KNOWLEDGE.md](https://github.com/coderbuzz/proto/blob/main/AI_KNOWLEDGE.md) for expert context.
 
-`proto` compiles high-performance binary codecs from
-[`@coderbuzz/kyo`](https://github.com/coderbuzz/kyo) schema validators at
-runtime. Since the schema is known at both encode and decode time, the wire
-format contains **no field names, no type tags, and no per-field headers** —
-just pure payload data.
+Proto compiles high-performance binary codecs from `@coderbuzz/kyo` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.
+
+The result: **structured data smaller than Protobuf, smaller than MessagePack, and dramatically smaller than JSON** — with full TypeScript type safety.
+
+---
+
+## Why Proto Over Standard Protobuf, MessagePack, or BSON?
+
+| Pain Point | Standard Protobuf | MessagePack | BSON | **@coderbuzz/proto** |
+|---|---|---|---|---|
+| Schema definition | `.proto` files + codegen | None (self-describing) | None (self-describing) | **TypeScript validators** (`@coderbuzz/kyo`) — no build step |
+| Per-field overhead | Tag + wire type + value | Type tag per value | Type tag + field name | **Zero** — no metadata per field |
+| Wire format size | Medium (tags add bytes) | Large (type tags) | Large (field names) | **Smallest** — pure payload |
+| Schema evolution | Designed for | N/A | N/A | Not supported (both ends must match) |
+| Runtime compilation | Build-time codegen | Runtime | Runtime | **Runtime** — compile from schema metadata once |
+| Union / `oneof` | Tag-based | No | No | **1 byte variant index** + value |
+| TypeScript integration | External `.d.ts` | Manual | Manual | **Native** — types from kyo validators |
+| Pre-calculate size | Manual | No | No | **`size()`** — exact bytes without encoding |
 
 ---
 
 ## How It Differs From Standard Protobuf
 
 | Feature | Standard Protobuf | `@coderbuzz/proto` |
-|---------|------------------|--------------------|
+|---|---|---|
 | Schema definition | `.proto` files + codegen | TypeScript validators (`@coderbuzz/kyo`) |
-| Field encoding | Tag + wire type + value (varint prefixed) | Value only (no tags, no wire types) |
+| Field encoding | Tag + wire type + value (varint prefixed) | Value only — no tags, no wire types |
 | Field order | Field number order | Schema key order (deterministic) |
 | Codec timing | Build-time codegen | Runtime compilation from schema metadata |
 | Unknown fields | Skipped during decode | Not applicable (schema required at both ends) |
-| Union / `oneof` | Tag-based with explicit oneof wrapper | Variant index byte + value |
-
-The wire format is significantly more compact than standard Protobuf for
-structured data because **no metadata is transmitted per field**.
+| Union / `oneof` | Tag-based with explicit oneof wrapper | 1-byte variant index + value |
+| `literal` encoding | Encoded as field value | **0 bytes** — value known from schema |
 
 ---
 
@@ -54,19 +65,18 @@ import { proto } from "@coderbuzz/proto";
 // Define a schema using kyo validators
 const User = object({ name: string(), age: number() });
 
-// Compile a binary codec
+// Compile a binary codec (once — the codec is pre-compiled)
 const codec = proto(User);
 
-// Encode
+// Encode — no field names, no tags, just payload
 const bytes = codec.encode({ name: "Alice", age: 30 });
 
 // Decode
 const user = codec.decode(bytes);
 // => { name: "Alice", age: 30 }
 
-// Pre-calculate size
+// Pre-calculate size without allocating
 const size = codec.size({ name: "Bob", age: 25 });
-// => encoded byte count
 ```
 
 ---
@@ -75,17 +85,13 @@ const size = codec.size({ name: "Bob", age: 25 });
 
 ### `proto<T>(validator: (val: any, ctx?: any) => T): ProtoCodec<T>`
 
-Compiles a binary codec from a kyo schema validator. The validator must have
-`METADATA` attached (all kyo validators do). Throws if the validator has no
-metadata or uses `any`/`unknown` types.
+Compiles a binary codec from a kyo schema validator. The validator must have `METADATA` attached (all kyo validators do).
 
 ```ts
 const codec = proto(object({ x: number(), y: number() }));
 ```
 
 ### `ProtoCodec<T>`
-
-Interface representing a compiled codec with three methods:
 
 ```ts
 interface ProtoCodec<T> {
@@ -97,8 +103,7 @@ interface ProtoCodec<T> {
 
 #### `encode(value: T): Uint8Array`
 
-Encodes a value matching the schema to compact binary. Returns a **copy** of
-the internal buffer.
+Encodes a value to compact binary. Returns a **copy** of the internal buffer.
 
 ```ts
 const bytes = codec.encode({ x: 10, y: 20 });
@@ -106,8 +111,7 @@ const bytes = codec.encode({ x: 10, y: 20 });
 
 #### `decode(buffer: Uint8Array): T`
 
-Decodes binary data back to the typed value. The schema must match the encoding
-schema exactly.
+Decodes binary data back to the typed value. Schema must match exactly.
 
 ```ts
 const point = codec.decode(bytes);
@@ -116,110 +120,31 @@ const point = codec.decode(bytes);
 
 #### `size(value: T): number`
 
-Pre-calculates the encoded byte size **without allocating** any buffer. The
-size always matches `encode(value).length`.
+Pre-calculates encoded byte size **without allocating** any buffer. Exact match for `encode(value).length`.
 
 ```ts
-codec.size({ x: 10, y: 20 }); // => exact byte count
+codec.size({ x: 10, y: 20 }); // exact byte count
 ```
 
 ---
 
 ## Supported Types
 
-### `string`
-
-```ts
-const codec = proto(string());
-```
-
-Wire format: `varint(byteLength)` + UTF-8 bytes.
-
-Examples:
-| Input | Encoded bytes |
-|-------|---------------|
-| `""` | `0x00` |
-| `"hello"` | `0x05` + `hello` |
-| Unicode | `varint(len)` + UTF-8 encoded |
-
-ASCII strings under 128 bytes use a fast inline encoder (avoids `TextEncoder`).
-
----
-
-### `number`
-
-```ts
-const codec = proto(number());
-```
-
-Wire format: `1-byte flag` + data.
-
-| Flag | Meaning | Data bytes | Range |
-|------|---------|------------|-------|
-| `0x00` | Unsigned varint | 1–5 bytes | `0` to `4294967295` |
-| `0x01` | Negative varint | 1–5 bytes | `-1` to `-2147483648` |
-| `0x02` | Float64 | 8 bytes | Non-integer or out-of-range |
-
-**Integer path** (flags `0`/`1`): Used when `val` is an integer within
-`[-2147483648, 4294967295]`. Signed integer range is encoded via absolute value
-with sign flag.
-
-**Float path** (flag `2`): Used for non-integral values and integers outside
-the safe varint range (including `Number.MAX_SAFE_INTEGER`).
-
-```ts
-const NumCodec = proto(number());
-
-// Varint path (unsigned):
-NumCodec.encode(42);     // flag 0x00 + varint(0x2a)
-// Varint path (negative):
-NumCodec.encode(-99);    // flag 0x01 + varint(0x63)
-// Float64 path:
-NumCodec.encode(3.14);   // flag 0x02 + 8 bytes float64
-```
-
----
-
-### `boolean`
-
-```ts
-const codec = proto(boolean());
-```
-
-Wire format: 1 byte (`0x00` for `false`, `0x01` for `true`).
-
----
-
-### `bigint`
-
-```ts
-const codec = proto(bigint());
-```
-
-Wire format: 8 bytes, signed 64-bit big-endian (`DataView.setBigInt64`).
-
----
-
-### `date`
-
-```ts
-const codec = proto(date());
-```
-
-Wire format: 8 bytes, float64 — milliseconds since epoch
-(`Date.prototype.getTime()`).
-
----
-
-### `uint8array`
-
-```ts
-const codec = proto(uint8array());
-```
-
-Wire format: `varint(length)` + raw bytes.
-
----
+| Type | Wire format | Overhead |
+|---|---|---|
+| `string` | `varint(len)` + UTF-8 | 1–5 bytes |
+| `number` (int) | 1-byte flag + varint | 2–6 bytes |
+| `number` (float) | 1-byte flag + 8 bytes float64 | 9 bytes |
+| `boolean` | 1 byte (`0x00`/`0x01`) | 1 byte |
+| `bigint` | 8 bytes int64 big-endian | 8 bytes |
+| `date` | 8 bytes float64 (ms since epoch) | 8 bytes |
+| `uint8array` | `varint(len)` + raw bytes | 1–5 bytes |
+| `object` | Fields in key order, no overhead | 0 per field |
+| `array` | `varint(len)` + items | 1–5 bytes |
+| `tuple` | Items in order, no length prefix | 0 |
+| `optional`/`nullable`/`nullish` | 1-byte flag + value | 1 byte |
+| `union` | 1-byte variant index + value | 1 byte |
+| `literal` | 0 bytes | **0** |
 
 ### `object`
 
@@ -233,8 +158,7 @@ const User = object({
 const codec = proto(User);
 ```
 
-Wire format: Fields encoded **in schema key order** — no field names, no tags,
-no length prefix. The schema determines the exact byte layout.
+Wire format: Fields encoded **in schema key order** — no field names, no tags, no length prefix.
 
 Objects can be arbitrarily nested:
 
@@ -251,183 +175,131 @@ const Response = object({
 });
 ```
 
----
+### `string`
+
+```ts
+const codec = proto(string());
+```
+
+Wire format: `varint(byteLength)` + UTF-8 bytes.
+
+| Input | Encoded bytes |
+|---|---|
+| `""` | `0x00` |
+| `"hello"` | `0x05` + `hello` |
+
+ASCII strings under 128 bytes use a fast inline encoder (avoids `TextEncoder`).
+
+### `number`
+
+Wire format: 1-byte flag + data.
+
+| Flag | Meaning | Data bytes | Range |
+|---|---|---|---|
+| `0x00` | Unsigned varint | 1–5 bytes | `0` to `4294967295` |
+| `0x01` | Negative varint | 1–5 bytes | `-1` to `-2147483648` |
+| `0x02` | Float64 | 8 bytes | Non-integer or out-of-range |
+
+### `boolean`
+
+1 byte (`0x00` for `false`, `0x01` for `true`).
+
+### `bigint`
+
+8 bytes, signed 64-bit big-endian.
+
+### `date`
+
+8 bytes, float64 — milliseconds since epoch.
+
+### `uint8array`
+
+`varint(length)` + raw bytes.
 
 ### `array`
+
+`varint(length)` + each element encoded consecutively.
 
 ```ts
 const codec = proto(array(number()));
 ```
 
-Wire format: `varint(length)` + each element encoded consecutively.
-
-Element types can be any valid kyo schema (including nested objects).
-
----
-
 ### `tuple`
+
+Elements encoded in order — **no length prefix** (length is known from schema).
 
 ```ts
 const codec = proto(tuple([string(), number(), boolean()]));
 ```
 
-Wire format: Elements encoded in order — **no length prefix** (length is known
-from schema).
+### `optional` / `nullable` / `nullish`
 
----
-
-### `optional`
+1-byte presence flag + value if present.
 
 ```ts
-const codec = proto(optional(string()));
+// optional: 0x00 = undefined, 0x01 = value follows
+// nullable: 0x00 = null, 0x01 = value follows
+// nullish: 0x00 = undefined/null, 0x01 = value follows
 ```
-
-Wire format: 1-byte presence flag + value if present.
-- `0x00` → value is `undefined`
-- `0x01` → value follows
-
-```ts
-const value: string | undefined = "hello";
-const bytes = codec.encode(value);
-// => [0x01, varint(5), ..."hello"]
-```
-
----
-
-### `nullable`
-
-```ts
-const codec = proto(nullable(string()));
-```
-
-Wire format: 1-byte presence flag + value if present.
-- `0x00` → value is `null`
-- `0x01` → value follows
-
----
-
-### `nullish`
-
-```ts
-const codec = proto(nullish(string()));
-```
-
-Wire format: 1-byte presence flag + value if present.
-- `0x00` → value is `undefined`
-- `0x01` → value follows
-
-**Note:** `null` is coerced to `undefined` on decode.
-
----
 
 ### `union`
 
+1-byte variant index + encoded value.
+
 ```ts
 const codec = proto(union([string(), number(), boolean()]));
+
+codec.encode("hello");  // variant index 0 + string
+codec.encode(42);       // variant index 1 + number
 ```
-
-Wire format: 1-byte variant index + encoded value.
-
-Each variant is matched at runtime against the input value using `typeof`,
-`instanceof`, or exact equality (for literals). The variant index (`0`, `1`,
-`2`, ...) is written as a single byte prefix.
-
-```ts
-const data: string | number | boolean = "hello";
-const bytes = codec.encode("hello");  // variant index 0 + string
-const val = codec.decode(bytes);       // => "hello"
-```
-
-**Throws at runtime** if no variant matches the value:
-`"Value does not match any union variant"`
-
----
 
 ### `literal`
 
+**0 bytes** — the value is known from the schema.
+
 ```ts
 const codec = proto(literal("ok"));
-```
-
-Wire format: **0 bytes**. The value is known from the schema and requires no
-wire representation.
-
-```ts
 codec.encode("ok");   // => Uint8Array(0) (empty)
 codec.decode(new Uint8Array(0)); // => "ok"
 ```
 
----
+### Unsupported: `any`, `unknown`
 
-### Unsupported Types
-
-`any` and `unknown` are **not supported** — the codec requires full type
-information to produce a deterministic wire format. Using them throws:
-
-```
-Cannot create protobuf codec for '<type>' — schema must be fully specified
-```
-
----
-
-## Wire Format Summary
-
-| Type | Bytes | Formula |
-|------|-------|---------|
-| `string` | 1–5 + N | `varint(len) + UTF-8` |
-| `number` (int) | 2–6 | `flag(1) + varint(abs)` |
-| `number` (float) | 9 | `flag(1) + float64(8)` |
-| `boolean` | 1 | `0x00` or `0x01` |
-| `bigint` | 8 | int64 big-endian |
-| `date` | 8 | float64 ms since epoch |
-| `uint8array` | 1–5 + N | `varint(len) + bytes` |
-| `object` | sum(fields) | fields in key order, no overhead |
-| `array` | 1–5 + sum(items) | `varint(len) + items` |
-| `tuple` | sum(items) | items in order, no length prefix |
-| `optional`/`nullable`/`nullish` | 1 + inner | presence flag + value |
-| `union` | 1 + variant | variant index byte + value |
-| `literal` | 0 | zero bytes |
+These throw — the codec requires full type information for a deterministic wire format.
 
 ---
 
 ## Performance
 
-`proto` is designed for applications where wire size and encoding speed matter:
-
-- **Smaller than JSON** for structured data — the test suite verifies medium
-  objects are < 70% of JSON size.
-- **Smaller than MessagePack** for structured data — no per-value type tags.
-- **Pre-calculable size** — `size()` lets you pre-allocate buffers, avoiding
-  double-buffering in high-throughput scenarios.
-- **Compiled codecs** — the encoder/decoder/sizer functions are compiled from
-  the schema metadata once at `proto()` call time, not at each encode/decode.
-- **ASCII fast path** — short ASCII strings bypass `TextEncoder`/`TextDecoder`.
+- **Smaller than JSON** — medium objects < 70% of JSON size
+- **Smaller than MessagePack** — no per-value type tags
+- **Pre-calculable size** — `size()` for buffer pre-allocation
+- **Compiled codecs** — encoder/decoder/sizer compiled from schema metadata once at `proto()` call time
+- **ASCII fast path** — short ASCII strings bypass `TextEncoder`/`TextDecoder`
 
 ---
 
 ## Error Handling
 
 | Scenario | Error |
-|----------|-------|
-| Validator lacks metadata | `"Validator has no schema metadata. Use Ken schema validators..."` |
+|---|---|
+| Validator lacks metadata | `"Validator has no schema metadata..."` |
 | Schema uses `any` or `unknown` | `"Cannot create protobuf codec for '<type>' — schema must be fully specified"` |
 | Union value matches no variant | `"Value does not match any union variant"` |
-| Malformed binary during decode | Unpredictable (no bounds checking) |
+| Malformed binary | Unpredictable (no bounds checking) |
 
 ---
 
 ## Limitations
 
-- **Schema must be known at both ends** — Unlike standard Protobuf, the wire
-  format cannot be decoded without the exact schema.
-- **No bounds checking on decode** — Only decode trusted data.
-- **No streaming** — The entire message must be in memory.
-- **No CJS build** — ESM only.
-- **Requires `@coderbuzz/kyo`** — Schema validators from kyo are the only way
-  to define codecs.
+- **Schema must be known at both ends** — cannot decode without exact schema
+- **No bounds checking on decode** — only decode trusted data
+- **No streaming** — entire message in memory
+- **No CJS build** — ESM only
+- **Requires `@coderbuzz/kyo`** — schema validators from kyo are the only way to define codecs
 
 ---
 
 ## License
 
-MIT &copy; 2026 Indra Gunawan
+MIT © 2026 Indra Gunawan

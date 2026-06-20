@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@d0bc006 -->
+<!-- docs: sync from coderbuzz/codex@cd4a13b -->
 
 # Proto — AI Agent Knowledge File
 

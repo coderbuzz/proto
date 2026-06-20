@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@796aac1 -->
+<!-- docs: sync from coderbuzz/codex@d0bc006 -->
 
 # Proto — `@coderbuzz/proto`
 
@@ -11,7 +11,7 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 ---
 
-## Why Proto Over Standard Protobuf, MessagePack, or BSON?
+## Why Proto over Standard Protobuf, MessagePack, or BSON?
 
 | Pain Point | Standard Protobuf | MessagePack | BSON | **@coderbuzz/proto** |
 |---|---|---|---|---|

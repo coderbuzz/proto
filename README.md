@@ -1,9 +1,15 @@
-<!-- docs: sync from coderbuzz/codex@cd4a13b -->
+<!-- docs: sync from coderbuzz/codex@46af4b9 -->
 
 # Proto — `@coderbuzz/proto`
 
 > **Binary serialization for TypeScript. Smaller than Protobuf. No `.proto` files. Zero per-field overhead.**
 > AI agents: see [AI_KNOWLEDGE.md](https://github.com/coderbuzz/proto/blob/main/AI_KNOWLEDGE.md) for expert context.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@coderbuzz/proto"><img src="https://img.shields.io/npm/v/@coderbuzz/proto.svg?style=flat-square" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@coderbuzz/proto"><img src="https://img.shields.io/npm/dm/@coderbuzz/proto.svg?style=flat-square" alt="npm downloads" /></a>
+  <a href="https://github.com/coderbuzz/proto/blob/main/LICENSE"><img src="https://img.shields.io/github/license/coderbuzz/proto.svg?style=flat-square" alt="MIT License" /></a>
+  <a href="https://github.com/coderbuzz/proto"><img src="https://img.shields.io/github/stars/coderbuzz/proto.svg?style=flat-square" alt="GitHub Stars" /></a>
+</p>
 
 Proto compiles high-performance binary codecs from `@coderbuzz/veta` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.
 

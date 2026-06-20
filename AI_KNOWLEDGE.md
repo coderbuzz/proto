@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@888f7d5 -->
+<!-- docs: sync from coderbuzz/codex@37792f4 -->
 
 # Proto — AI Agent Knowledge File
 
@@ -7,13 +7,13 @@
 without `.proto` files.\
 **Distribution:** ESM only (`dist/index.js` + `dist/index.d.ts`). No source
 `.ts` files in the package.\
-**Dependency:** Requires `@coderbuzz/kyo` for schema validators.
+**Dependency:** Requires `@coderbuzz/veta` for schema validators.
 
 ---
 
 ## Mental Model
 
-`proto` compiles **three optimized closure functions** from a kyo schema
+`proto` compiles **three optimized closure functions** from a veta schema
 `TypeMeta` tree at `proto()` call time:
 1. **Encoder** — writes binary to a reusable internal buffer
 2. **Decoder** — reads binary from an input buffer
@@ -23,7 +23,7 @@ These closures are compiled once and cached in the returned `ProtoCodec`
 object. There is no runtime schema lookup during encode/decode.
 
 ```
-schema (kyo validator)
+schema (veta validator)
   │
   ├─ validator[METADATA] → TypeMeta tree
   │
@@ -42,15 +42,15 @@ schema (kyo validator)
 ```ts
 import { proto } from "@coderbuzz/proto";
 
-// Also import kyo validators
-import { object, string, number, boolean, array, union, literal, optional, nullable, nullish, tuple, date, bigint, uint8array } from "@coderbuzz/kyo";
+// Also import veta validators
+import { object, string, number, boolean, array, union, literal, optional, nullable, nullish, tuple, date, bigint, uint8array } from "@coderbuzz/veta";
 ```
 
 ---
 
 ## `proto<T>(validator): ProtoCodec<T>`
 
-The single entry point. Takes a kyo validator function and returns a compiled
+The single entry point. Takes a veta validator function and returns a compiled
 codec.
 
 ```ts
@@ -58,12 +58,12 @@ const codec = proto(object({ name: string(), age: number() }));
 ```
 
 **Rules:**
-- `validator` MUST be a kyo validator (has `validator[METADATA]`).
+- `validator` MUST be a veta validator (has `validator[METADATA]`).
 - Plain validator functions (e.g., `(val) => val`) throw:
   `"Validator has no schema metadata. Use Ken schema validators..."`.
 - `any` and `unknown` are NOT supported — throws:
   `"Cannot create protobuf codec for '<type>' — schema must be fully specified"`.
-- All other kyo types (`string`, `number`, `boolean`, `bigint`, `date`,
+- All other veta types (`string`, `number`, `boolean`, `bigint`, `date`,
   `uint8array`, `object`, `array`, `tuple`, `optional`, `nullable`, `nullish`,
   `union`, `literal`) are supported.
 
@@ -302,7 +302,7 @@ codec.decode(emptyBuffer);  // => "ok"
 ### Basic Object
 
 ```ts
-import { object, string, number, boolean } from "@coderbuzz/kyo";
+import { object, string, number, boolean } from "@coderbuzz/veta";
 import { proto } from "@coderbuzz/proto";
 
 const User = object({

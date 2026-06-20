@@ -1,11 +1,11 @@
-<!-- docs: sync from coderbuzz/codex@888f7d5 -->
+<!-- docs: sync from coderbuzz/codex@37792f4 -->
 
 # Proto — `@coderbuzz/proto`
 
 > **Binary serialization for TypeScript. Smaller than Protobuf. No `.proto` files. Zero per-field overhead.**
 > AI agents: see [AI_KNOWLEDGE.md](https://github.com/coderbuzz/proto/blob/main/AI_KNOWLEDGE.md) for expert context.
 
-Proto compiles high-performance binary codecs from `@coderbuzz/kyo` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.
+Proto compiles high-performance binary codecs from `@coderbuzz/veta` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.
 
 The result: **structured data smaller than Protobuf, smaller than MessagePack, and dramatically smaller than JSON** — with full TypeScript type safety.
 
@@ -15,13 +15,13 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 | Pain Point | Standard Protobuf | MessagePack | BSON | **@coderbuzz/proto** |
 |---|---|---|---|---|
-| Schema definition | `.proto` files + codegen | None (self-describing) | None (self-describing) | **TypeScript validators** (`@coderbuzz/kyo`) — no build step |
+| Schema definition | `.proto` files + codegen | None (self-describing) | None (self-describing) | **TypeScript validators** (`@coderbuzz/veta`) — no build step |
 | Per-field overhead | Tag + wire type + value | Type tag per value | Type tag + field name | **Zero** — no metadata per field |
 | Wire format size | Medium (tags add bytes) | Large (type tags) | Large (field names) | **Smallest** — pure payload |
 | Schema evolution | Designed for | N/A | N/A | Not supported (both ends must match) |
 | Runtime compilation | Build-time codegen | Runtime | Runtime | **Runtime** — compile from schema metadata once |
 | Union / `oneof` | Tag-based | No | No | **1 byte variant index** + value |
-| TypeScript integration | External `.d.ts` | Manual | Manual | **Native** — types from kyo validators |
+| TypeScript integration | External `.d.ts` | Manual | Manual | **Native** — types from veta validators |
 | Pre-calculate size | Manual | No | No | **`size()`** — exact bytes without encoding |
 
 ---
@@ -30,7 +30,7 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 | Feature | Standard Protobuf | `@coderbuzz/proto` |
 |---|---|---|
-| Schema definition | `.proto` files + codegen | TypeScript validators (`@coderbuzz/kyo`) |
+| Schema definition | `.proto` files + codegen | TypeScript validators (`@coderbuzz/veta`) |
 | Field encoding | Tag + wire type + value (varint prefixed) | Value only — no tags, no wire types |
 | Field order | Field number order | Schema key order (deterministic) |
 | Codec timing | Build-time codegen | Runtime compilation from schema metadata |
@@ -44,13 +44,13 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 ```sh
 # npm
-npm install @coderbuzz/proto @coderbuzz/kyo
+npm install @coderbuzz/proto @coderbuzz/veta
 
 # Bun
-bun add @coderbuzz/proto @coderbuzz/kyo
+bun add @coderbuzz/proto @coderbuzz/veta
 
 # Deno
-import { object, string, number } from "npm:@coderbuzz/kyo";
+import { object, string, number } from "npm:@coderbuzz/veta";
 import { proto } from "npm:@coderbuzz/proto";
 ```
 
@@ -59,10 +59,10 @@ import { proto } from "npm:@coderbuzz/proto";
 ## Quick Start
 
 ```ts
-import { object, string, number } from "@coderbuzz/kyo";
+import { object, string, number } from "@coderbuzz/veta";
 import { proto } from "@coderbuzz/proto";
 
-// Define a schema using kyo validators
+// Define a schema using veta validators
 const User = object({ name: string(), age: number() });
 
 // Compile a binary codec (once — the codec is pre-compiled)
@@ -85,7 +85,7 @@ const size = codec.size({ name: "Bob", age: 25 });
 
 ### `proto<T>(validator: (val: any, ctx?: any) => T): ProtoCodec<T>`
 
-Compiles a binary codec from a kyo schema validator. The validator must have `METADATA` attached (all kyo validators do).
+Compiles a binary codec from a veta schema validator. The validator must have `METADATA` attached (all veta validators do).
 
 ```ts
 const codec = proto(object({ x: number(), y: number() }));
@@ -322,7 +322,7 @@ All tests on Apple M-series, Bun runtime.
 - **No bounds checking on decode** — only decode trusted data
 - **No streaming** — entire message in memory
 - **No CJS build** — ESM only
-- **Requires `@coderbuzz/kyo`** — schema validators from kyo are the only way to define codecs
+- **Requires `@coderbuzz/veta`** — schema validators from veta are the only way to define codecs
 
 ---
 

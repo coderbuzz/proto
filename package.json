@@ -1,0 +1,12 @@
+{
+  "name": "@coderbuzz/proto-ci",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@coderbuzz/proto": "latest",
+    "@coderbuzz/veta": "latest"
+  }
+}

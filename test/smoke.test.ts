@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { proto } from "@coderbuzz/proto";
+import { proto } from "../src/index";
 import { object, string, number } from "@coderbuzz/veta";
 
 test("proto encode/decode object", () => {

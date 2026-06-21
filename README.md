@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@46af4b9 -->
+<!-- docs: sync from coderbuzz/codex@e5210d1 -->
 
 # Proto — `@coderbuzz/proto`
 
@@ -9,6 +9,8 @@
   <a href="https://www.npmjs.com/package/@coderbuzz/proto"><img src="https://img.shields.io/npm/dm/@coderbuzz/proto.svg?style=flat-square" alt="npm downloads" /></a>
   <a href="https://github.com/coderbuzz/proto/blob/main/LICENSE"><img src="https://img.shields.io/github/license/coderbuzz/proto.svg?style=flat-square" alt="MIT License" /></a>
   <a href="https://github.com/coderbuzz/proto"><img src="https://img.shields.io/github/stars/coderbuzz/proto.svg?style=flat-square" alt="GitHub Stars" /></a>
+  <a href="https://github.com/coderbuzz/codex/actions/workflows/ci.proto.yml"><img src="https://github.com/coderbuzz/codex/actions/workflows/ci.proto.yml/badge.svg" alt="CI" /></a>
+  <a href="https://codecov.io/gh/coderbuzz/codex"><img src="https://codecov.io/gh/coderbuzz/codex/graph/badge.svg?flag=proto" alt="Codecov" /></a>
 </p>
 
 Proto compiles high-performance binary codecs from `@coderbuzz/veta` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.

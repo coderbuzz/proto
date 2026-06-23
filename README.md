@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@e9b6bce -->
+<!-- docs: sync from coderbuzz/codex@b1e2bde -->
 
 # Proto — `@coderbuzz/proto`
 
@@ -321,6 +321,106 @@ These throw — the codec requires full type information for a deterministic wir
 | Schema uses `any` or `unknown` | `"Cannot create protobuf codec for '<type>' — schema must be fully specified"` |
 | Union value matches no variant | `"Value does not match any union variant"` |
 | Malformed binary | Unpredictable (no bounds checking) |
+
+---
+
+## Common Patterns
+
+### HTTP Binary Response
+
+```ts
+import { proto } from "@coderbuzz/proto";
+import { object, number, string, array } from "@coderbuzz/veta";
+
+const ApiResponse = object({
+  status: number(),
+  users: array(object({ id: number(), name: string() })),
+});
+
+const codec = proto(ApiResponse);
+
+// Encode response directly to binary
+app.get("/api/users", () => {
+  const data = { status: 200, users: [{ id: 1, name: "Alice" }] };
+  return new Response(codec.encode(data), {
+    headers: { "Content-Type": "application/x-protobuf" },
+  });
+});
+
+// Client: decode binary response
+const res = await fetch("/api/users");
+const buf = new Uint8Array(await res.arrayBuffer());
+const result = codec.decode(buf);
+// => { status: 200, users: [{ id: 1, name: "Alice" }] }
+```
+
+### WebSocket Frames with Pre-allocated Buffer
+
+```ts
+const Point = object({ x: number(), y: number() });
+const codec = proto(Point);
+
+const buf = new Uint8Array(codec.size({ x: 0, y: 0 })); // worst-case size
+
+ws.onmessage = (event) => {
+  const point = codec.decode(new Uint8Array(event.data));
+  // => { x: ..., y: ... }
+};
+
+function sendPoint(x: number, y: number) {
+  const bytes = codec.encode({ x, y });
+  ws.send(bytes);
+}
+```
+
+### Discriminated Events
+
+```ts
+const ClickEvent = object({ type: literal("click"), x: number(), y: number() });
+const KeyEvent = object({ type: literal("keyup"), key: string() });
+const Event = union([ClickEvent, KeyEvent]);
+
+const codec = proto(Event);
+codec.encode({ type: "click" as const, x: 100, y: 200 });
+// Wire: 0x00 (variant 0) + flag(0) + varint(100) + flag(0) + varint(200)
+```
+
+### Schema Validation + Binary Encoding
+
+```ts
+// Validate first, then encode — coercion works at validation time
+const schema = object({
+  id: coerce(number()),
+  name: string({ min: 2 }),
+});
+
+const codec = proto(schema);
+
+function handle(raw: unknown): Uint8Array {
+  const validated = schema(raw);     // validate + coerce
+  return codec.encode(validated);    // encode from validated data
+}
+
+const bytes = handle({ id: "42", name: "Alice" });
+// id is coerced "42" → 42 during validation, then 42 encoded as varint
+```
+
+### Bulk Encode with `size()`
+
+```ts
+function encodeBatch(items: User[]): Uint8Array {
+  let total = 0;
+  for (const item of items) total += codec.size(item);
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const item of items) {
+    const bytes = codec.encode(item);
+    buf.set(bytes, offset);
+    offset += bytes.length;
+  }
+  return buf;
+}
+```
 
 ---
 

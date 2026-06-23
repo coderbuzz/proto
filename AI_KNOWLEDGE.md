@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@e9b6bce -->
+<!-- docs: sync from coderbuzz/codex@b1e2bde -->
 
 # Proto — AI Agent Knowledge File
 
@@ -486,3 +486,83 @@ The savings come from:
 1. **No field names** — unlike JSON/MessagePack
 2. **No per-value type tags** — unlike MessagePack
 3. **Efficient integer encoding** — varint for common ranges
+
+---
+
+## Compilation Internals
+
+`proto(validator)` extracts `TypeMeta` from `validator[METADATA]` and compiles three closures:
+
+### compileEncoder(meta) → `(buf: Buf, val: any) => void`
+
+Walk the `TypeMeta` tree and generate write operations:
+```
+meta.type dispatch:
+  "string"    → writeVarint(buf, length) + writeString(buf, val)
+  "number"    → writeNumber(buf, val) (flag + varint or float64)
+  "boolean"   → writeByte(buf, val ? 1 : 0)
+  "bigint"    → DataView.setBigInt64(buf, val)
+  "date"      → DataView.setFloat64(buf, val.getTime())
+  "uint8array"→ writeVarint(buf, length) + writeBuf(buf, val)
+  "object"    → for each key: compileEncoder(shape[key])(buf, val[key])
+  "array"     → writeVarint(buf, length); for each item: encodeItem(buf, item)
+  "tuple"     → for each item: encodeItem(buf, item) (no length prefix)
+  "optional"  → if val===undefined: write 0x00; else: write 0x01 + encodeInner(val)
+  "nullable"  → if val===null: write 0x00; else: write 0x01 + encodeInner(val)
+  "nullish"   → if val==null: write 0x00; else: write 0x01 + encodeInner(val)
+  "union"     → findMatchingVariant(val); write variantIndex; encodeVariant(val)
+  "literal"   → (no-op — value is known)
+  "any"       → throw (unsupported)
+```
+
+### compileDecoder(meta) → `(buf: Buf) => any`
+
+Walk the `TypeMeta` tree and generate read operations — mirror of encoder:
+```
+meta.type dispatch:
+  "string"    → readVarint(buf) + readString(buf, len)
+  "number"    → readNumber(buf) (flag dispatch: varint or float64)
+  "boolean"   → buf[pos++] === 1
+  "bigint"    → DataView.getBigInt64(buf, pos); pos += 8
+  "date"      → new Date(DataView.getFloat64(buf, pos))
+  "uint8array"→ readVarint(buf) + buf.subarray(pos, pos+len)
+  "object"    → accumulate results via FOR_EACH shape keys
+  "array"     → readVarint(len); build array, recurse per item
+  "tuple"     → build array via FOR_EACH items (no length read)
+  "optional"  → if buf[pos++]===0: undefined; else: decodeInner()
+  "nullable"  → if buf[pos++]===0: null; else: decodeInner()
+  "nullish"   → if buf[pos++]===0: undefined; else: decodeInner()
+  "union"     → variantIndex=buf[pos++]; switch: decodeVariant(variantIndex)
+  "literal"   → return meta.value (embedded in closure)
+```
+
+### compileSizer(meta) → `(val: any) => number`
+
+Pure arithmetic — identical traversal to encoder but calculates rather than writes:
+- Varint sizes use pre-computed `varintSize(val)`.
+- String sizes use `val.length` for ASCII (fast path) or `new TextEncoder().encode(val).length`.
+- Object/array sizes sum children recursively.
+- Optional/nullable/nullish: +1 byte if present.
+
+### Compilation Model
+
+Compilation happens **once** at `proto(validator)` call time. The closures are cached on the returned `ProtoCodec` object. No runtime schema lookup during encode/decode — the closures are pure JavaScript with inline branch prediction.
+
+### Schema Constraints for Proto
+
+| Veta Feature | Proto Support |
+|---|---|
+| `coerce(validator)` | Works — coercion happens at **validation** time (before encode), not during serialization. Use veta schema for validation first, proto for binary encoding. |
+| `pipe(validators)` | Works — `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
+| `objectAsync()` | Compiles the same shape as sync `object()`. Async field validators have their `METADATA` extracted if available. |
+| Custom function validators | No `METADATA` — these cannot be compiled into binary codecs. Throws if used as schema root. |
+| `any` / `unknown` | Not supported — throw at compile time. Schema must be fully specified for deterministic wire format. |
+
+### Internal Buffer (shared with msgpack)
+
+Proto's encoder reuses the same buffer module as `@coderbuzz/msgpack`:
+- Single module-level buffer: `buf`, `dv`, `pos`
+- Starts at 64 KB, doubles on overflow
+- Each `encode()` returns `buf.slice(0, pos)` (safe copy)
+- Thread-safe (JS single-threaded)
+- `size()` does NOT use the buffer — pure arithmetic

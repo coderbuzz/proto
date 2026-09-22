@@ -1,6 +1,6 @@
-<!-- docs: sync from coderbuzz/codex@b1e2bde -->
+<!-- docs: sync from coderbuzz/codex@200be78 -->
 
-# Proto — `@coderbuzz/proto`
+# Proto: `@coderbuzz/proto`
 
 > **Binary serialization for TypeScript. Smaller than Protobuf. No `.proto` files. Zero per-field overhead.**
 > AI agents: see [AI_KNOWLEDGE.md](https://github.com/coderbuzz/proto/blob/main/AI_KNOWLEDGE.md) for expert context.
@@ -13,9 +13,9 @@
   <a href="https://codecov.io/gh/coderbuzz/proto"><img src="https://codecov.io/gh/coderbuzz/proto/graph/badge.svg" alt="Codecov" /></a>
 </p>
 
-Proto compiles high-performance binary codecs from `@coderbuzz/veta` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers** — just pure payload data.
+Proto compiles high-performance binary codecs from `@coderbuzz/veta` schema validators at **runtime**. Since the schema is known at both ends, the wire format contains **no field names, no type tags, and no per-field headers**, just pure payload data.
 
-The result: **structured data smaller than Protobuf, smaller than MessagePack, and dramatically smaller than JSON** — with full TypeScript type safety.
+The result: **structured data smaller than Protobuf, smaller than MessagePack, and dramatically smaller than JSON**, with full TypeScript type safety.
 
 ---
 
@@ -23,14 +23,14 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 | Pain Point | Standard Protobuf | MessagePack | BSON | **@coderbuzz/proto** |
 |---|---|---|---|---|
-| Schema definition | `.proto` files + codegen | None (self-describing) | None (self-describing) | **TypeScript validators** (`@coderbuzz/veta`) — no build step |
-| Per-field overhead | Tag + wire type + value | Type tag per value | Type tag + field name | **Zero** — no metadata per field |
-| Wire format size | Medium (tags add bytes) | Large (type tags) | Large (field names) | **Smallest** — pure payload |
+| Schema definition | `.proto` files + codegen | None (self-describing) | None (self-describing) | **TypeScript validators** (`@coderbuzz/veta`): no build step |
+| Per-field overhead | Tag + wire type + value | Type tag per value | Type tag + field name | **Zero**: no metadata per field |
+| Wire format size | Medium (tags add bytes) | Large (type tags) | Large (field names) | **Smallest**: pure payload |
 | Schema evolution | Designed for | N/A | N/A | Not supported (both ends must match) |
-| Runtime compilation | Build-time codegen | Runtime | Runtime | **Runtime** — compile from schema metadata once |
+| Runtime compilation | Build-time codegen | Runtime | Runtime | **Runtime**: compile from schema metadata once |
 | Union / `oneof` | Tag-based | No | No | **1 byte variant index** + value |
-| TypeScript integration | External `.d.ts` | Manual | Manual | **Native** — types from veta validators |
-| Pre-calculate size | Manual | No | No | **`size()`** — exact bytes without encoding |
+| TypeScript integration | External `.d.ts` | Manual | Manual | **Native**: types from veta validators |
+| Pre-calculate size | Manual | No | No | **`size()`**: exact bytes without encoding |
 
 ---
 
@@ -39,12 +39,12 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 | Feature | Standard Protobuf | `@coderbuzz/proto` |
 |---|---|---|
 | Schema definition | `.proto` files + codegen | TypeScript validators (`@coderbuzz/veta`) |
-| Field encoding | Tag + wire type + value (varint prefixed) | Value only — no tags, no wire types |
+| Field encoding | Tag + wire type + value (varint prefixed) | Value only: no tags, no wire types |
 | Field order | Field number order | Schema key order (deterministic) |
 | Codec timing | Build-time codegen | Runtime compilation from schema metadata |
 | Unknown fields | Skipped during decode | Not applicable (schema required at both ends) |
 | Union / `oneof` | Tag-based with explicit oneof wrapper | 1-byte variant index + value |
-| `literal` encoding | Encoded as field value | **0 bytes** — value known from schema |
+| `literal` encoding | Encoded as field value | **0 bytes**: value known from schema |
 
 ---
 
@@ -60,7 +60,7 @@ All tests on Apple M-series, Bun runtime.
 |---|---|---|
 | **@coderbuzz/proto** | **65** | **53% smaller** |
 | @coderbuzz/msgpack | 111 | 20% smaller |
-| JSON | 139 | — |
+| JSON | 139 | baseline |
 
 ### Encode Throughput (nested object)
 
@@ -109,10 +109,10 @@ import { proto } from "@coderbuzz/proto";
 // Define a schema using veta validators
 const User = object({ name: string(), age: number() });
 
-// Compile a binary codec (once — the codec is pre-compiled)
+// Compile a binary codec (once, since the codec is pre-compiled)
 const codec = proto(User);
 
-// Encode — no field names, no tags, just payload
+// Encode: no field names, no tags, just payload
 const bytes = codec.encode({ name: "Alice", age: 30 });
 
 // Decode
@@ -202,7 +202,7 @@ const User = object({
 const codec = proto(User);
 ```
 
-Wire format: Fields encoded **in schema key order** — no field names, no tags, no length prefix.
+Wire format: Fields encoded **in schema key order**, with no field names, no tags, and no length prefix.
 
 Objects can be arbitrarily nested:
 
@@ -254,7 +254,7 @@ Wire format: 1-byte flag + data.
 
 ### `date`
 
-8 bytes, float64 — milliseconds since epoch.
+8 bytes, float64: milliseconds since epoch.
 
 ### `uint8array`
 
@@ -270,7 +270,7 @@ const codec = proto(array(number()));
 
 ### `tuple`
 
-Elements encoded in order — **no length prefix** (length is known from schema).
+Elements encoded in order, **no length prefix** (length is known from schema).
 
 ```ts
 const codec = proto(tuple([string(), number(), boolean()]));
@@ -299,7 +299,7 @@ codec.encode(42);       // variant index 1 + number
 
 ### `literal`
 
-**0 bytes** — the value is known from the schema.
+**0 bytes**: the value is known from the schema.
 
 ```ts
 const codec = proto(literal("ok"));
@@ -309,7 +309,7 @@ codec.decode(new Uint8Array(0)); // => "ok"
 
 ### Unsupported: `any`, `unknown`
 
-These throw — the codec requires full type information for a deterministic wire format.
+These throw: the codec requires full type information for a deterministic wire format.
 
 ---
 
@@ -388,7 +388,7 @@ codec.encode({ type: "click" as const, x: 100, y: 200 });
 ### Schema Validation + Binary Encoding
 
 ```ts
-// Validate first, then encode — coercion works at validation time
+// Validate first, then encode: coercion works at validation time
 const schema = object({
   id: coerce(number()),
   name: string({ min: 2 }),
@@ -426,11 +426,11 @@ function encodeBatch(items: User[]): Uint8Array {
 
 ## Limitations
 
-- **Schema must be known at both ends** — cannot decode without exact schema
-- **No bounds checking on decode** — only decode trusted data
-- **No streaming** — entire message in memory
-- **No CJS build** — ESM only
-- **Requires `@coderbuzz/veta`** — schema validators from veta are the only way to define codecs
+- **Schema must be known at both ends**: cannot decode without exact schema
+- **No bounds checking on decode**: only decode trusted data
+- **No streaming**: entire message in memory
+- **No CJS build**: ESM only
+- **Requires `@coderbuzz/veta`**: schema validators from veta are the only way to define codecs
 
 ---
 

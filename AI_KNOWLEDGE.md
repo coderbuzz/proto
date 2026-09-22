@@ -1,10 +1,10 @@
-<!-- docs: sync from coderbuzz/codex@b1e2bde -->
+<!-- docs: sync from coderbuzz/codex@200be78 -->
 
-# Proto — AI Agent Knowledge File
+# Proto: AI Agent Knowledge File
 
 **Package:** `@coderbuzz/proto`
-**Purpose:** Schema-driven binary serialization — Protobuf-style encoding
-without `.proto` files.\
+**Purpose:** Schema-driven binary serialization (Protobuf-style encoding
+without `.proto` files).\
 **Distribution:** ESM only (`dist/index.js` + `dist/index.d.ts`). No source
 `.ts` files in the package.\
 **Dependency:** Requires `@coderbuzz/veta` for schema validators.
@@ -15,9 +15,9 @@ without `.proto` files.\
 
 `proto` compiles **three optimized closure functions** from a veta schema
 `TypeMeta` tree at `proto()` call time:
-1. **Encoder** — writes binary to a reusable internal buffer
-2. **Decoder** — reads binary from an input buffer
-3. **Sizer** — calculates byte size without allocating
+1. **Encoder**: writes binary to a reusable internal buffer
+2. **Decoder**: reads binary from an input buffer
+3. **Sizer**: calculates byte size without allocating
 
 These closures are compiled once and cached in the returned `ProtoCodec`
 object. There is no runtime schema lookup during encode/decode.
@@ -61,7 +61,7 @@ const codec = proto(object({ name: string(), age: number() }));
 - `validator` MUST be a veta validator (has `validator[METADATA]`).
 - Plain validator functions (e.g., `(val) => val`) throw:
   `"Validator has no schema metadata. Use Ken schema validators..."`.
-- `any` and `unknown` are NOT supported — throws:
+- `any` and `unknown` are NOT supported, and throws:
   `"Cannot create protobuf codec for '<type>' — schema must be fully specified"`.
 - All other veta types (`string`, `number`, `boolean`, `bigint`, `date`,
   `uint8array`, `object`, `array`, `tuple`, `optional`, `nullable`, `nullish`,
@@ -128,10 +128,10 @@ Three-way dispatch based on value at encode time:
 
 ```ts
 const codec = proto(number());
-codec.encode(42);      // flag 0x00 + varint(42)       — unsigned varint
-codec.encode(-99);     // flag 0x01 + varint(99)       — negative varint
-codec.encode(3.14);    // flag 0x02 + float64(3.14)    — float64
-codec.encode(1e20);    // flag 0x02 + float64           — exceeds varint range
+codec.encode(42);      // flag 0x00 + varint(42): unsigned varint
+codec.encode(-99);     // flag 0x01 + varint(99): negative varint
+codec.encode(3.14);    // flag 0x02 + float64(3.14): float64
+codec.encode(1e20);    // flag 0x02 + float64: exceeds varint range
 ```
 
 **Integer range for varint path:** `[-2147483648, 4294967295]`.
@@ -150,13 +150,13 @@ codec.encode(1e20);    // flag 0x02 + float64           — exceeds varint range
 
 ### `bigint`
 
-8 bytes — signed 64-bit big-endian (`DataView.setBigInt64`).
+8 bytes: signed 64-bit big-endian (`DataView.setBigInt64`).
 
 ---
 
 ### `date`
 
-8 bytes — float64 of `.getTime()` (milliseconds since epoch).
+8 bytes: float64 of `.getTime()` (milliseconds since epoch).
 
 ---
 
@@ -168,7 +168,7 @@ codec.encode(1e20);    // flag 0x02 + float64           — exceeds varint range
 
 ### `object`
 
-Fields encoded **in schema key order** — no field names, no tags, no length
+Fields encoded **in schema key order**, with no field names, no tags, and no length
 prefix. The schema is the sole determinant of the wire layout.
 
 ```ts
@@ -199,7 +199,7 @@ const codec = proto(array(number()));
 
 ### `tuple`
 
-Elements encoded in order — **no length prefix**. Length is determined by the
+Elements encoded in order, **no length prefix**. Length is determined by the
 schema.
 
 ```ts
@@ -240,7 +240,7 @@ Wire: 1-byte presence flag + value if present.
 
 ```ts
 const codec = proto(nullish(number()));
-// Codec type: number | null | undefined — but null is coerced to undefined
+// Codec type: number | null | undefined, though null is coerced to undefined
 ```
 
 Wire: 1-byte presence flag + value if present.
@@ -387,7 +387,7 @@ function encodeBatch(points: Point[]): Uint8Array {
   const sizes = points.map((p) => codec.size(p));
   const total = sizes.reduce((a, b) => a + b, 0);
   
-  // Use internal encode, then copy — or use a pooled approach
+  // Use internal encode, then copy, or use a pooled approach
   const buf = new Uint8Array(total);
   const scratch = new Uint8Array(9); // max varint + flag
   let offset = 0;
@@ -467,7 +467,7 @@ try {
   //   Error("Validator has no schema metadata...")
   //   Error("Cannot create protobuf codec for '<type>'...")
   //   Error("Value does not match any union variant")
-  //   RangeError (DataView reading past buffer — malformed input)
+  //   RangeError (DataView reading past buffer: malformed input)
 }
 ```
 
@@ -483,9 +483,9 @@ try {
 | 3-user array with nested objects | ~240 B | ~180 B | ~120 B |
 
 The savings come from:
-1. **No field names** — unlike JSON/MessagePack
-2. **No per-value type tags** — unlike MessagePack
-3. **Efficient integer encoding** — varint for common ranges
+1. **No field names**: unlike JSON/MessagePack
+2. **No per-value type tags**: unlike MessagePack
+3. **Efficient integer encoding**: varint for common ranges
 
 ---
 
@@ -511,13 +511,13 @@ meta.type dispatch:
   "nullable"  → if val===null: write 0x00; else: write 0x01 + encodeInner(val)
   "nullish"   → if val==null: write 0x00; else: write 0x01 + encodeInner(val)
   "union"     → findMatchingVariant(val); write variantIndex; encodeVariant(val)
-  "literal"   → (no-op — value is known)
+  "literal"   → (no-op: value is known)
   "any"       → throw (unsupported)
 ```
 
 ### compileDecoder(meta) → `(buf: Buf) => any`
 
-Walk the `TypeMeta` tree and generate read operations — mirror of encoder:
+Walk the `TypeMeta` tree and generate read operations, mirroring the encoder:
 ```
 meta.type dispatch:
   "string"    → readVarint(buf) + readString(buf, len)
@@ -538,7 +538,7 @@ meta.type dispatch:
 
 ### compileSizer(meta) → `(val: any) => number`
 
-Pure arithmetic — identical traversal to encoder but calculates rather than writes:
+Pure arithmetic, identical traversal to encoder but calculates rather than writes:
 - Varint sizes use pre-computed `varintSize(val)`.
 - String sizes use `val.length` for ASCII (fast path) or `new TextEncoder().encode(val).length`.
 - Object/array sizes sum children recursively.
@@ -546,17 +546,17 @@ Pure arithmetic — identical traversal to encoder but calculates rather than wr
 
 ### Compilation Model
 
-Compilation happens **once** at `proto(validator)` call time. The closures are cached on the returned `ProtoCodec` object. No runtime schema lookup during encode/decode — the closures are pure JavaScript with inline branch prediction.
+Compilation happens **once** at `proto(validator)` call time. The closures are cached on the returned `ProtoCodec` object. No runtime schema lookup during encode/decode. The closures are pure JavaScript with inline branch prediction.
 
 ### Schema Constraints for Proto
 
 | Veta Feature | Proto Support |
 |---|---|
-| `coerce(validator)` | Works — coercion happens at **validation** time (before encode), not during serialization. Use veta schema for validation first, proto for binary encoding. |
-| `pipe(validators)` | Works — `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
+| `coerce(validator)` | Works: coercion happens at **validation** time (before encode), not during serialization. Use veta schema for validation first, proto for binary encoding. |
+| `pipe(validators)` | Works: `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
 | `objectAsync()` | Compiles the same shape as sync `object()`. Async field validators have their `METADATA` extracted if available. |
-| Custom function validators | No `METADATA` — these cannot be compiled into binary codecs. Throws if used as schema root. |
-| `any` / `unknown` | Not supported — throw at compile time. Schema must be fully specified for deterministic wire format. |
+| Custom function validators | No `METADATA`: these cannot be compiled into binary codecs. Throws if used as schema root. |
+| `any` / `unknown` | Not supported: throw at compile time. Schema must be fully specified for deterministic wire format. |
 
 ### Internal Buffer (shared with msgpack)
 
@@ -565,4 +565,4 @@ Proto's encoder reuses the same buffer module as `@coderbuzz/msgpack`:
 - Starts at 64 KB, doubles on overflow
 - Each `encode()` returns `buf.slice(0, pos)` (safe copy)
 - Thread-safe (JS single-threaded)
-- `size()` does NOT use the buffer — pure arithmetic
+- `size()` does NOT use the buffer: pure arithmetic

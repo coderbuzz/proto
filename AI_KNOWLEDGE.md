@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b37bd48 -->
+<!-- docs: sync from coderbuzz/codex@a6a5df1 -->
 
 # Proto: AI Agent Knowledge File
 
@@ -60,15 +60,18 @@ const codec = proto(object({ name: string(), age: number() }));
 **Rules:**
 - `validator` MUST be a veta validator (has `validator[METADATA]`).
 - Plain validator functions (e.g., `(val) => val`) throw:
-  `"Validator has no schema metadata. Use Ken schema validators..."`.
+  `"Validator has no schema metadata, so no codec can be built for it..."`.
+  Describe one with veta's `withMeta(fn, { type: ... })`.
 - `any` and `unknown` are NOT supported, and throws:
   `"Cannot create protobuf codec for '<type>'..."` ("schema must be fully specified").
 - All other veta types (`string`, `number`, `boolean`, `bigint`, `date`,
   `uint8array`, `object`, `array`, `tuple`, `optional`, `nullable`, `nullish`,
-  `union`, `literal`) are supported. `decimal()` carries `string` metadata and
-  encodes as a string.
-- Async validators (`objectAsync`, `arrayAsync`, `tupleAsync`, `unionAsync`,
-  `pipeAsync`) and `withContext()` attach no `METADATA`: they throw as a root.
+  `union`, `literal`) are supported. `decimal()` and `isoDate()` carry `string`
+  metadata and encode as strings; `picklist()` and `discriminatedUnion()` carry
+  union metadata.
+- Since veta 0.5.0 the async variants carry the same metadata as the sync ones,
+  so `proto(objectAsync(...))` compiles (the codec never calls the validator).
+  `withContext()` has metadata only when given `{ meta }`; `lazy()` never.
 
 ---
 
@@ -176,9 +179,11 @@ Fields encoded **in schema key order**, with no field names, no tags, and no len
 prefix. The schema is the sole determinant of the wire layout.
 
 **Gotchas:**
-- A field whose validator has no `METADATA` (custom function, `withContext()`,
-  `pipe()` ending in a custom function) is left out of veta's shape metadata, so
-  proto silently drops it from the wire. No error is thrown.
+- An object with a field whose validator has no `METADATA` (custom function,
+  `withContext()` without `meta`, `lazy()`, `pipe()` ending in a custom function)
+  has no metadata itself (veta 0.5.0, `VETA-26`), so `proto()` throws. Before,
+  veta described only the other fields and proto silently dropped that one from
+  the wire. Fix with `withMeta()`.
 - Keys in the value that are not in the schema are ignored.
 - A missing required field passes `undefined` to the field encoder, which
   usually throws a `TypeError` (for example `string` reads `.length`).
@@ -491,7 +496,7 @@ try {
   const decoded = codec.decode(bytes);
 } catch (err) {
   // May be:
-  //   Error("Validator has no schema metadata...")
+  //   Error("Validator has no schema metadata, so no codec can be built for it...")
   //   Error("Cannot create protobuf codec for '<type>'...")
   //   Error("Value does not match any union variant")
   //   RangeError (DataView reading past buffer: malformed input)
@@ -589,7 +594,7 @@ Compilation happens **once** at `proto(validator)` call time. The closures are c
 | `coerce(validator)` | Works: coercion happens at **validation** time (before encode), not during serialization. Use veta schema for validation first, proto for binary encoding. |
 | `pipe(validators)` | Works: `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
 | `pipe(validators)` caveat | If the last validator has no `METADATA` (custom function), the pipe has none either and `proto()` throws. |
-| `objectAsync()` and other async variants | No `METADATA` attached: `proto()` throws `"Validator has no schema metadata..."`. |
+| `objectAsync()` and other async variants | Same `METADATA` as the sync variants (veta 0.5.0): compiles. |
 | Custom function validators / `withContext()` | No `METADATA`: throws if used as schema root. Inside an `object`, the field is silently dropped from the wire. |
 | `decimal()` | Carries `string` metadata; encoded as a string. |
 | `any` / `unknown` | Not supported: throw at compile time. Schema must be fully specified for deterministic wire format. |

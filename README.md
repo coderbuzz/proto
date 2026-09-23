@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b37bd48 -->
+<!-- docs: sync from coderbuzz/codex@a6a5df1 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -435,8 +435,8 @@ function encodeBatch(items: User[]): Uint8Array {
 - **No streaming**: entire message in memory
 - **No CJS build**: ESM only
 - **Requires `@coderbuzz/veta`**: schema validators from veta are the only way to define codecs
-- **Fields without metadata are dropped**: an `object` field whose validator has no `METADATA` (a custom function, `withContext()`, a `pipe()` ending in a custom function) is left out of the wire format with no error
-- **Async validators have no metadata**: `objectAsync()`, `arrayAsync()` and the other async variants cannot be compiled
+- **Every field must be described**: an `object` with a field whose validator has no `METADATA` (a custom function, `withContext()` without `meta`, `lazy()`, a `pipe()` ending in a custom function) has no metadata itself, and `proto()` throws. Describe the field with veta's `withMeta(fn, { type: ... })`. Before veta 0.5.0 such a field was silently left out of the wire format
+- **Async validators compile** since veta 0.5.0: `objectAsync()`, `arrayAsync()` and the other async variants carry the same metadata as their sync counterparts
 
 ---
 

@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@200be78 -->
+<!-- docs: sync from coderbuzz/codex@b37bd48 -->
 
 # Proto: AI Agent Knowledge File
 
@@ -62,10 +62,13 @@ const codec = proto(object({ name: string(), age: number() }));
 - Plain validator functions (e.g., `(val) => val`) throw:
   `"Validator has no schema metadata. Use Ken schema validators..."`.
 - `any` and `unknown` are NOT supported, and throws:
-  `"Cannot create protobuf codec for '<type>' — schema must be fully specified"`.
+  `"Cannot create protobuf codec for '<type>'..."` ("schema must be fully specified").
 - All other veta types (`string`, `number`, `boolean`, `bigint`, `date`,
   `uint8array`, `object`, `array`, `tuple`, `optional`, `nullable`, `nullish`,
-  `union`, `literal`) are supported.
+  `union`, `literal`) are supported. `decimal()` carries `string` metadata and
+  encodes as a string.
+- Async validators (`objectAsync`, `arrayAsync`, `tupleAsync`, `unionAsync`,
+  `pipeAsync`) and `withContext()` attach no `METADATA`: they throw as a root.
 
 ---
 
@@ -139,6 +142,7 @@ codec.encode(1e20);    // flag 0x02 + float64: exceeds varint range
 **Rules:**
 - Integers outside varint range use float64.
 - Non-integer values (including `Infinity`, `-Infinity`, `NaN`) use float64.
+- `-0` passes `Number.isInteger`, takes the unsigned varint path, and decodes as `0`.
 
 ---
 
@@ -170,6 +174,14 @@ codec.encode(1e20);    // flag 0x02 + float64: exceeds varint range
 
 Fields encoded **in schema key order**, with no field names, no tags, and no length
 prefix. The schema is the sole determinant of the wire layout.
+
+**Gotchas:**
+- A field whose validator has no `METADATA` (custom function, `withContext()`,
+  `pipe()` ending in a custom function) is left out of veta's shape metadata, so
+  proto silently drops it from the wire. No error is thrown.
+- Keys in the value that are not in the schema are ignored.
+- A missing required field passes `undefined` to the field encoder, which
+  usually throws a `TypeError` (for example `string` reads `.length`).
 
 ```ts
 const Point = object({ x: number(), y: number() });
@@ -221,6 +233,8 @@ Wire: 1-byte presence flag + value if present.
 - `0x00` → value is `undefined`
 - `0x01` → value follows
 
+**Lossy behavior:** `null` is also encoded as `0x00`, decoded as `undefined`.
+
 ---
 
 ### `nullable`
@@ -233,6 +247,8 @@ const codec = proto(nullable(number()));
 Wire: 1-byte presence flag + value if present.
 - `0x00` → value is `null`
 - `0x01` → value follows
+
+**Lossy behavior:** `undefined` is also encoded as `0x00`, decoded as `null`.
 
 ---
 
@@ -273,9 +289,20 @@ Wire: 1-byte variant index + encoded value.
 | `array` | `Array.isArray(val)` |
 | `literal` | `val === meta.value` |
 | `optional/nullable/nullish` | `val === undefined \|\| val === null \|\| matchesMeta(val, meta.inner)` |
+| `tuple`, nested `union` | Never matches (no case in `matchesMeta`) |
 
 **Order matters:** The first matching variant wins. Declare more specific types
 (e.g., `literal`) before general types (e.g., `string`).
+
+**Object variants do not discriminate.** Every `object` variant matches any
+non-null, non-array object; the shape and literal fields are not checked. In
+`union([object({ type: literal("click"), x: number() }), object({ type: literal("keyup"), key: string() })])`
+encoding `{ type: "keyup", key: "a" }` picks variant 0 and decodes as
+`{ type: "click", x: NaN }`. Do not use more than one `object` variant in a
+union encoded with proto.
+
+**Decode:** the variant index byte is not range-checked; an out-of-range index
+throws `TypeError` (calling `undefined`).
 
 **Throws at runtime** if no variant matches:
 `"Value does not match any union variant"`
@@ -479,8 +506,15 @@ try {
 
 | Payload | JSON | MessagePack | proto |
 |---------|------|-------------|-------|
-| `{id:1, name:"Ken", active:true}` | ~38 B | ~30 B | ~17 B |
-| 3-user array with nested objects | ~240 B | ~180 B | ~120 B |
+| `{id:1, name:"Ken", active:true}` | 35 B | 22 B | 7 B |
+| Benchmark nested object | 139 B | 111 B | 65 B |
+
+Benchmark throughput (Apple M-series, Bun, from `coderbuzz/benchmarks`):
+
+| Operation | JSON | @coderbuzz/proto | @coderbuzz/msgpack | @msgpack/msgpack |
+|---|---|---|---|---|
+| Encode (ops/s) | 6,892,630 | 4,694,891 | 3,275,386 | 1,323,117 |
+| Decode (ops/s) | 3,320,669 | 3,109,557 | 1,231,876 | 1,086,271 |
 
 The savings come from:
 1. **No field names**: unlike JSON/MessagePack
@@ -493,7 +527,7 @@ The savings come from:
 
 `proto(validator)` extracts `TypeMeta` from `validator[METADATA]` and compiles three closures:
 
-### compileEncoder(meta) → `(buf: Buf, val: any) => void`
+### compileEncoder(meta) → `(val: any) => void` (writes to the module-level buffer)
 
 Walk the `TypeMeta` tree and generate write operations:
 ```
@@ -507,15 +541,15 @@ meta.type dispatch:
   "object"    → for each key: compileEncoder(shape[key])(buf, val[key])
   "array"     → writeVarint(buf, length); for each item: encodeItem(buf, item)
   "tuple"     → for each item: encodeItem(buf, item) (no length prefix)
-  "optional"  → if val===undefined: write 0x00; else: write 0x01 + encodeInner(val)
-  "nullable"  → if val===null: write 0x00; else: write 0x01 + encodeInner(val)
+  "optional"  → if val==null: write 0x00; else: write 0x01 + encodeInner(val)
+  "nullable"  → if val==null: write 0x00; else: write 0x01 + encodeInner(val)
   "nullish"   → if val==null: write 0x00; else: write 0x01 + encodeInner(val)
   "union"     → findMatchingVariant(val); write variantIndex; encodeVariant(val)
   "literal"   → (no-op: value is known)
-  "any"       → throw (unsupported)
+  "any"/"unknown" → throw (unsupported)
 ```
 
-### compileDecoder(meta) → `(buf: Buf) => any`
+### compileDecoder(meta) → `() => any` (reads module-level decode state)
 
 Walk the `TypeMeta` tree and generate read operations, mirroring the encoder:
 ```
@@ -525,7 +559,7 @@ meta.type dispatch:
   "boolean"   → buf[pos++] === 1
   "bigint"    → DataView.getBigInt64(buf, pos); pos += 8
   "date"      → new Date(DataView.getFloat64(buf, pos))
-  "uint8array"→ readVarint(buf) + buf.subarray(pos, pos+len)
+  "uint8array"→ readVarint(buf) + buf.slice(pos, pos+len) (copy)
   "object"    → accumulate results via FOR_EACH shape keys
   "array"     → readVarint(len); build array, recurse per item
   "tuple"     → build array via FOR_EACH items (no length read)
@@ -554,15 +588,28 @@ Compilation happens **once** at `proto(validator)` call time. The closures are c
 |---|---|
 | `coerce(validator)` | Works: coercion happens at **validation** time (before encode), not during serialization. Use veta schema for validation first, proto for binary encoding. |
 | `pipe(validators)` | Works: `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
-| `objectAsync()` | Compiles the same shape as sync `object()`. Async field validators have their `METADATA` extracted if available. |
-| Custom function validators | No `METADATA`: these cannot be compiled into binary codecs. Throws if used as schema root. |
+| `pipe(validators)` caveat | If the last validator has no `METADATA` (custom function), the pipe has none either and `proto()` throws. |
+| `objectAsync()` and other async variants | No `METADATA` attached: `proto()` throws `"Validator has no schema metadata..."`. |
+| Custom function validators / `withContext()` | No `METADATA`: throws if used as schema root. Inside an `object`, the field is silently dropped from the wire. |
+| `decimal()` | Carries `string` metadata; encoded as a string. |
 | `any` / `unknown` | Not supported: throw at compile time. Schema must be fully specified for deterministic wire format. |
 
-### Internal Buffer (shared with msgpack)
+### Internal Buffer
 
-Proto's encoder reuses the same buffer module as `@coderbuzz/msgpack`:
-- Single module-level buffer: `buf`, `dv`, `pos`
+Proto has its own encoder buffer (same design as `@coderbuzz/msgpack`, not shared;
+proto does not depend on msgpack):
+- Single module-level buffer: `buf`, `dv`, `pos`, shared by every codec from `proto()`
 - Starts at 64 KB, doubles on overflow
 - Each `encode()` returns `buf.slice(0, pos)` (safe copy)
 - Thread-safe (JS single-threaded)
 - `size()` does NOT use the buffer: pure arithmetic
+
+---
+
+## Limitations
+
+- Schema must be known at both ends: no schema evolution, no unknown-field skipping.
+- No bounds checking on decode: only decode trusted data.
+- No streaming: entire message in memory.
+- ESM only, no CJS build.
+- Requires `@coderbuzz/veta` (the only runtime dependency).

@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@200be78 -->
+<!-- docs: sync from coderbuzz/codex@b37bd48 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -244,6 +244,8 @@ Wire format: 1-byte flag + data.
 | `0x01` | Negative varint | 1–5 bytes | `-1` to `-2147483648` |
 | `0x02` | Float64 | 8 bytes | Non-integer or out-of-range |
 
+`-0` takes the integer path and decodes as `0`.
+
 ### `boolean`
 
 1 byte (`0x00` for `false`, `0x01` for `true`).
@@ -278,7 +280,7 @@ const codec = proto(tuple([string(), number(), boolean()]));
 
 ### `optional` / `nullable` / `nullish`
 
-1-byte presence flag + value if present.
+1-byte presence flag + value if present. All three write `0x00` for both `null` and `undefined`, so `nullish` decodes `null` as `undefined`.
 
 ```ts
 // optional: 0x00 = undefined, 0x01 = value follows
@@ -318,7 +320,7 @@ These throw: the codec requires full type information for a deterministic wire f
 | Scenario | Error |
 |---|---|
 | Validator lacks metadata | `"Validator has no schema metadata..."` |
-| Schema uses `any` or `unknown` | `"Cannot create protobuf codec for '<type>' — schema must be fully specified"` |
+| Schema uses `any` or `unknown` | `"Cannot create protobuf codec for '<type>'..."` |
 | Union value matches no variant | `"Value does not match any union variant"` |
 | Malformed binary | Unpredictable (no bounds checking) |
 
@@ -360,7 +362,7 @@ const result = codec.decode(buf);
 const Point = object({ x: number(), y: number() });
 const codec = proto(Point);
 
-const buf = new Uint8Array(codec.size({ x: 0, y: 0 })); // worst-case size
+const buf = new Uint8Array(codec.size({ x: 0, y: 0 })); // exact size of this value, not a worst case
 
 ws.onmessage = (event) => {
   const point = codec.decode(new Uint8Array(event.data));
@@ -384,6 +386,8 @@ const codec = proto(Event);
 codec.encode({ type: "click" as const, x: 100, y: 200 });
 // Wire: 0x00 (variant 0) + flag(0) + varint(100) + flag(0) + varint(200)
 ```
+
+> **Warning:** union variants are matched by type only, and every `object` variant matches any object. The first object variant always wins, so `codec.encode({ type: "keyup", key: "a" })` above is written as a `ClickEvent` and decodes as `{ type: "click", x: NaN, y: NaN }`. Until this is fixed, do not put more than one `object` variant in a union you encode with proto.
 
 ### Schema Validation + Binary Encoding
 
@@ -431,6 +435,8 @@ function encodeBatch(items: User[]): Uint8Array {
 - **No streaming**: entire message in memory
 - **No CJS build**: ESM only
 - **Requires `@coderbuzz/veta`**: schema validators from veta are the only way to define codecs
+- **Fields without metadata are dropped**: an `object` field whose validator has no `METADATA` (a custom function, `withContext()`, a `pipe()` ending in a custom function) is left out of the wire format with no error
+- **Async validators have no metadata**: `objectAsync()`, `arrayAsync()` and the other async variants cannot be compiled
 
 ---
 

@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a6a5df1 -->
+<!-- docs: sync from coderbuzz/codex@eeb7661 -->
 
 # Proto: AI Agent Knowledge File
 
@@ -40,15 +40,15 @@ schema (veta validator)
 ## Import Map
 
 ```ts
-import { proto } from "@coderbuzz/proto";
+import { proto, ProtoDecodeError, type ProtoCodec } from "@coderbuzz/proto";
 
 // Also import veta validators
-import { object, string, number, boolean, array, union, literal, optional, nullable, nullish, tuple, date, bigint, uint8array } from "@coderbuzz/veta";
+import { object, string, number, boolean, array, union, literal, optional, nullable, nullish, tuple, date, bigint, uint8array, picklist, discriminatedUnion, decimal, isoDate } from "@coderbuzz/veta";
 ```
 
 ---
 
-## `proto<T>(validator): ProtoCodec<T>`
+## `proto<T>(validator): ProtoCodec<Awaited<T>>`
 
 The single entry point. Takes a veta validator function and returns a compiled
 codec.
@@ -67,10 +67,18 @@ const codec = proto(object({ name: string(), age: number() }));
 - All other veta types (`string`, `number`, `boolean`, `bigint`, `date`,
   `uint8array`, `object`, `array`, `tuple`, `optional`, `nullable`, `nullish`,
   `union`, `literal`) are supported. `decimal()` and `isoDate()` carry `string`
-  metadata and encode as strings; `picklist()` and `discriminatedUnion()` carry
-  union metadata.
+  metadata and encode as strings, exactly (`'10.10'` stays `'10.10'`).
+  `picklist()` and `discriminatedUnion()` carry union metadata: a picklist holds
+  at most 256 options, and a discriminatedUnion is encoded by its tag field.
+- `proto()` also throws, at compile time, for: a union (or picklist) with more
+  than 256 variants; a union with 2+ object variants and no literal/picklist
+  field whose values tell them apart; an array whose items encode to zero bytes
+  (`array(literal("x"))`, an array of all-literal objects). `record()` and
+  `lazy()` have no metadata, so they throw the "no schema metadata" error.
 - Since veta 0.5.0 the async variants carry the same metadata as the sync ones,
   so `proto(objectAsync(...))` compiles (the codec never calls the validator).
+  Its type is `ProtoCodec<Awaited<T>>`: the value the promise resolves to, which is
+  what `decode()` returns at runtime (in 0.1.32 and earlier it was typed as a `Promise`).
   `withContext()` has metadata only when given `{ meta }`; `lazy()` never.
 
 ---
@@ -80,19 +88,57 @@ const codec = proto(object({ name: string(), age: number() }));
 ```ts
 interface ProtoCodec<T> {
   encode(value: T): Uint8Array;
-  decode(buffer: Uint8Array): T;
+  decode(buffer: Uint8Array): T;   // throws ProtoDecodeError on malformed bytes
   size(value: T): number;
 }
+
+class ProtoDecodeError extends Error {
+  readonly name: 'ProtoDecodeError';
+  readonly offset: number;          // byte position where decoding stopped
+  // message: "<reason> at byte <offset>"
+}
 ```
+
+## Decode checks (after 0.1.32)
+
+`decode()` refuses, with `ProtoDecodeError`, every byte sequence that is not
+exactly one value of the schema:
+
+| Check | Example message |
+|---|---|
+| Input ends before the value does (any fixed-width read, string/bytes length, varint) | `Unexpected end of input: 6 more byte(s) needed at byte 7` |
+| Bytes left after the value | `4 trailing byte(s) after the value at byte 14` |
+| Boolean or presence byte not `0x00`/`0x01` | `Invalid boolean byte 0x07 at byte 0` |
+| Number flag not `0`/`1`/`2` | `Invalid number flag 0x03 at byte 0` |
+| Union index ≥ variant count | `Union variant 9 does not exist (2 variants) at byte 0` |
+| Varint longer than 5 bytes or above 2^32−1 | `Varint does not fit in 32 bits at byte 4` |
+| Array count larger than the remaining bytes can hold (count > remaining / minimum item size) | `Array count 4294967295 is more than the 0 byte(s) left can hold at byte 0` |
+
+The array check runs before anything is allocated. In 0.1.32 and earlier, a 5-byte
+payload (`ff ff ff ff 0f`) made `decode()` allocate a 4,294,967,295-element
+array and the process ran out of memory; a truncated buffer decoded to
+plausible garbage (`"100.\u0000\u0000"`, `false`).
+
+What `decode()` does **not** check: the validator's rules (`string({ max })`,
+`decimal({ scale })`, `number({ integer, min })`, `isoDate()` format, `refine()`,
+`check()`, picklist values are safe because they are indices). For untrusted
+input, run the validator on the result: `Schema(codec.decode(bytes))`.
+Cost measured on a 20-line invoice (Bun 1.4.2): decode 12 µs, decode + validate
+31.6 µs; the bounds checks themselves cost 2–9%.
 
 ## Encoding Rules
 
 ### Internal Buffer
 
 - Single module-level reusable buffer (`buf`, `dv`, `pos`).
-- Starts at 64 KB, grows geometrically (doubles) when needed.
+- Starts at 64 KB, grows geometrically (doubles, by multiplication; the old
+  `<<=` wrapped at 2^31 and looped forever above 1 GiB) when needed. It never
+  shrinks.
 - Each `encode()` call resets `pos = 0` and uses the shared buffer.
-- Thread-safe because JS is single-threaded and encode is synchronous.
+- Re-entrant: an `encode()` called while another is running (a getter on the
+  value that encodes something else) gets its own buffer, and the outer state
+  is restored afterwards. In 0.1.32 and earlier, the inner call overwrote the outer
+  bytes. An encode that throws leaves the codec usable.
 
 ### Varint Encoding
 
@@ -158,6 +204,10 @@ codec.encode(1e20);    // flag 0x02 + float64: exceeds varint range
 ### `bigint`
 
 8 bytes: signed 64-bit big-endian (`DataView.setBigInt64`).
+Range −2^63 … 2^63−1; outside it `encode()` throws
+`RangeError: bigint <n> does not fit in the 64-bit signed wire format`
+(`setBigInt64` would silently take the value modulo 2^64). veta's `bigint()`
+accepts any size, so check the range in the schema if values can be larger.
 
 ---
 
@@ -185,8 +235,11 @@ prefix. The schema is the sole determinant of the wire layout.
   veta described only the other fields and proto silently dropped that one from
   the wire. Fix with `withMeta()`.
 - Keys in the value that are not in the schema are ignored.
-- A missing required field passes `undefined` to the field encoder, which
-  usually throws a `TypeError` (for example `string` reads `.length`).
+- `encode()` does not validate. A missing required field passes `undefined` to
+  the field encoder: `string` throws a `TypeError` (reads `.length`), but
+  `number` silently writes `NaN`, `boolean` writes `false`, and a `literal`
+  field writes nothing, so a wrong literal value decodes as the schema's
+  literal. Encode values that came out of the validator.
 
 ```ts
 const Point = object({ x: number(), y: number() });
@@ -205,6 +258,13 @@ Objects can be nested arbitrarily deep. Each nested object is encoded inline
 ### `array`
 
 `varint(length)` + each element encoded consecutively.
+
+The item schema must take at least one byte: `proto(array(literal("x")))`
+throws at compile time ("array whose items encode to zero bytes"), because
+decode bounds an array's count by `remaining bytes / minimum item size`.
+Minimum sizes: `string`/`boolean`/`uint8array`/`array`/wrappers/`union` 1,
+`number` 2, `bigint`/`date` 8, `object`/`tuple` the sum of their fields,
+`literal` 0.
 
 ```ts
 const codec = proto(array(number()));
@@ -293,21 +353,35 @@ Wire: 1-byte variant index + encoded value.
 | `object` | `typeof val === 'object' && val !== null && !Array.isArray(val)` |
 | `array` | `Array.isArray(val)` |
 | `literal` | `val === meta.value` |
-| `optional/nullable/nullish` | `val === undefined \|\| val === null \|\| matchesMeta(val, meta.inner)` |
-| `tuple`, nested `union` | Never matches (no case in `matchesMeta`) |
+| `optional/nullable/nullish` | `val === undefined \|\| val === null \|\| <inner matches>` |
+| `tuple` | `Array.isArray(val) && val.length === items.length` |
+| nested `union` (incl. `picklist`) | one of its own variants matches (the inner union then writes its own index: outer index + inner index) |
+
+Matchers are compiled once per union (cached per `TypeMeta`), not re-derived
+per value.
 
 **Order matters:** The first matching variant wins. Declare more specific types
 (e.g., `literal`) before general types (e.g., `string`).
 
-**Object variants do not discriminate.** Every `object` variant matches any
-non-null, non-array object; the shape and literal fields are not checked. In
-`union([object({ type: literal("click"), x: number() }), object({ type: literal("keyup"), key: string() })])`
-encoding `{ type: "keyup", key: "a" }` picks variant 0 and decodes as
-`{ type: "click", x: NaN }`. Do not use more than one `object` variant in a
-union encoded with proto.
+**Object variants are discriminated.** With one object variant, it matches any
+non-null, non-array object (unchanged). With two or more (counting
+`optional/nullable/nullish` wrappers around an object), `proto()` looks for a
+key present in every one of them as a `literal()` or `picklist()` whose values
+are disjoint across the variants, the same rule `discriminatedUnion()`
+enforces, and the first such key in the first object variant's key order is
+used. Each object variant then matches only objects whose tag is one of its
+values (a wrapped one also matches `null`/`undefined`). A value whose tag is
+none of them throws "Value does not match any union variant". No such key →
+`proto()` throws "A union has N object variants and no literal field that tells
+them apart". In 0.1.32 and earlier, the first object variant always won:
+`{ type: "keyup", key: "a" }` was written as a `click`, a credit journal line
+as a debit.
 
-**Decode:** the variant index byte is not range-checked; an out-of-range index
-throws `TypeError` (calling `undefined`).
+**Limits:** at most 256 variants (the index is one byte); more throws at
+compile time. In 0.1.32 and earlier, index 256+ wrapped (`ACC-299` decoded as
+`ACC-43`).
+
+**Decode:** an index ≥ the variant count throws `ProtoDecodeError`.
 
 **Throws at runtime** if no variant matches:
 `"Value does not match any union variant"`
@@ -491,16 +565,60 @@ const byteCount = codec.size(payload);
 ## Error Handling
 
 ```ts
+// At proto() (compile time):
+//   Error("Validator has no schema metadata, so no codec can be built for it...")
+//   Error("Cannot create protobuf codec for '<type>'...")                 // any / unknown
+//   Error("Cannot create protobuf codec for an array whose items encode to zero bytes...")
+//   Error("A union has N object variants and no literal field that tells them apart...")
+//   Error("A union (or picklist) has N variants, but the variant index is one byte...")
 try {
   const bytes = codec.encode(value);
+  // encode(): Error("Value does not match any union variant")
+  //           RangeError("bigint <n> does not fit in the 64-bit signed wire format")
   const decoded = codec.decode(bytes);
 } catch (err) {
-  // May be:
-  //   Error("Validator has no schema metadata, so no codec can be built for it...")
-  //   Error("Cannot create protobuf codec for '<type>'...")
-  //   Error("Value does not match any union variant")
-  //   RangeError (DataView reading past buffer: malformed input)
+  if (err instanceof ProtoDecodeError) {
+    // malformed bytes: truncated, trailing, bad flag/index/varint, oversized count
+    console.log(err.offset);
+  }
 }
+```
+
+### Decoding untrusted input
+
+```ts
+import { proto, ProtoDecodeError } from "@coderbuzz/proto";
+import { object, string, decimal, isVetaError } from "@coderbuzz/veta";
+import { HttpError } from "@coderbuzz/velox";
+
+const Invoice = object({ ref: string({ max: 32 }), amount: decimal({ scale: 2 }) });
+const codec = proto(Invoice);
+
+function read(bytes: Uint8Array) {
+  try {
+    return Invoice(codec.decode(bytes)); // shape checked by decode, rules by the validator
+  } catch (err) {
+    if (err instanceof ProtoDecodeError || isVetaError(err)) throw new HttpError(400, "Invalid body");
+    throw err;
+  }
+}
+```
+
+Without the validator call, a forged payload decodes `amount` as any string
+(`"NaN; DROP"` was accepted in the audit) while typed as a validated decimal.
+
+### Discriminated Events
+
+```ts
+const ClickEvent = object({ type: literal("click"), x: number(), y: number() });
+const KeyEvent = object({ type: literal("keyup"), key: string() });
+const Event = discriminatedUnion("type", [ClickEvent, KeyEvent]); // union([...]) works too
+
+const codec = proto(Event);
+codec.encode({ type: "click" as const, x: 100, y: 200 });
+// Wire: 0x00 (variant 0) + flag(0) + varint(100) + flag(0) + varint(200)
+codec.encode({ type: "keyup" as const, key: "a" });
+// Wire: 0x01 (variant 1) + varint(1) + "a"
 ```
 
 ---
@@ -579,7 +697,8 @@ meta.type dispatch:
 
 Pure arithmetic, identical traversal to encoder but calculates rather than writes:
 - Varint sizes use pre-computed `varintSize(val)`.
-- String sizes use `val.length` for ASCII (fast path) or `new TextEncoder().encode(val).length`.
+- String sizes use `val.length` for ASCII (fast path) or `textEncoder.encode(val).length`
+  for non-ASCII, which allocates (so `size()` is allocation-free for ASCII only).
 - Object/array sizes sum children recursively.
 - Optional/nullable/nullish: +1 byte if present.
 
@@ -595,7 +714,10 @@ Compilation happens **once** at `proto(validator)` call time. The closures are c
 | `pipe(validators)` | Works: `METADATA` is from the **last** validator in the pipe. Encode uses final value; transformations happen before encoding. |
 | `pipe(validators)` caveat | If the last validator has no `METADATA` (custom function), the pipe has none either and `proto()` throws. |
 | `objectAsync()` and other async variants | Same `METADATA` as the sync variants (veta 0.5.0): compiles. |
-| Custom function validators / `withContext()` | No `METADATA`: throws if used as schema root. Inside an `object`, the field is silently dropped from the wire. |
+| Custom function validators / `withContext()` | No `METADATA`: throws, as the schema root and inside an `object` (veta 0.5.0 object metadata is all-or-nothing; before that the field was silently dropped). Describe it with `withMeta()`. |
+| `discriminatedUnion()` / tagged `union()` of objects | Encoded by the tag field (after 0.1.32). |
+| `picklist()` | Union of literals: ≤ 256 options. |
+| `record()`, `lazy()` | No `METADATA`: throws. |
 | `decimal()` | Carries `string` metadata; encoded as a string. |
 | `any` / `unknown` | Not supported: throw at compile time. Schema must be fully specified for deterministic wire format. |
 
@@ -613,8 +735,16 @@ proto does not depend on msgpack):
 
 ## Limitations
 
-- Schema must be known at both ends: no schema evolution, no unknown-field skipping.
-- No bounds checking on decode: only decode trusted data.
+- Schema must be known at both ends: no schema evolution, no unknown-field skipping,
+  and nothing in the bytes identifies the schema. Bytes encoded with another version
+  are misread, not rejected: swapping the order of `debit` and `credit` in the shape
+  makes old bytes decode with the two values exchanged; a field added at the end
+  makes an old buffer fail with `ProtoDecodeError` (truncated). Never persist proto
+  bytes across a schema change.
+- Decode checks the bytes (see "Decode checks"), not the validator's rules.
+- `nullish` decodes `null` as `undefined`, and an absent `optional` field comes back
+  as `key: undefined` (veta itself leaves the key out).
+- A union holds at most 256 variants; `bigint` is limited to int64.
 - No streaming: entire message in memory.
 - ESM only, no CJS build.
 - Requires `@coderbuzz/veta` (the only runtime dependency).

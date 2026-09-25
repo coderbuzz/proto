@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a6a5df1 -->
+<!-- docs: sync from coderbuzz/codex@eeb7661 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -119,7 +119,7 @@ const bytes = codec.encode({ name: "Alice", age: 30 });
 const user = codec.decode(bytes);
 // => { name: "Alice", age: 30 }
 
-// Pre-calculate size without allocating
+// Exact encoded size, without encoding
 const size = codec.size({ name: "Bob", age: 25 });
 ```
 
@@ -157,6 +157,8 @@ const bytes = codec.encode({ x: 10, y: 20 });
 
 Decodes binary data back to the typed value. Schema must match exactly.
 
+The bytes must be one complete, well-formed value: a truncated buffer, bytes left over, a boolean byte other than `0x00`/`0x01`, a union index that does not exist, or an array count larger than the input could hold throws `ProtoDecodeError` (with the byte `offset`). `decode()` checks the **shape** of the bytes only. It does not run the validator, so `string({ max })`, `decimal({ scale })` or `refine()` rules are not checked: see [Decoding untrusted input](#decoding-untrusted-input).
+
 ```ts
 const point = codec.decode(bytes);
 // => { x: 10, y: 20 }
@@ -164,7 +166,7 @@ const point = codec.decode(bytes);
 
 #### `size(value: T): number`
 
-Pre-calculates encoded byte size **without allocating** any buffer. Exact match for `encode(value).length`.
+Calculates the encoded byte size **without encoding**. Exact match for `encode(value).length`. It allocates nothing for ASCII strings; a non-ASCII string is measured with `TextEncoder`.
 
 ```ts
 codec.size({ x: 10, y: 20 }); // exact byte count
@@ -180,14 +182,14 @@ codec.size({ x: 10, y: 20 }); // exact byte count
 | `number` (int) | 1-byte flag + varint | 2–6 bytes |
 | `number` (float) | 1-byte flag + 8 bytes float64 | 9 bytes |
 | `boolean` | 1 byte (`0x00`/`0x01`) | 1 byte |
-| `bigint` | 8 bytes int64 big-endian | 8 bytes |
+| `bigint` | 8 bytes int64 big-endian (−2^63 to 2^63−1) | 8 bytes |
 | `date` | 8 bytes float64 (ms since epoch) | 8 bytes |
 | `uint8array` | `varint(len)` + raw bytes | 1–5 bytes |
 | `object` | Fields in key order, no overhead | 0 per field |
-| `array` | `varint(len)` + items | 1–5 bytes |
+| `array` | `varint(len)` + items (items must take ≥ 1 byte) | 1–5 bytes |
 | `tuple` | Items in order, no length prefix | 0 |
 | `optional`/`nullable`/`nullish` | 1-byte flag + value | 1 byte |
-| `union` | 1-byte variant index + value | 1 byte |
+| `union` | 1-byte variant index + value (at most 256 variants) | 1 byte |
 | `literal` | 0 bytes | **0** |
 
 ### `object`
@@ -252,7 +254,7 @@ Wire format: 1-byte flag + data.
 
 ### `bigint`
 
-8 bytes, signed 64-bit big-endian.
+8 bytes, signed 64-bit big-endian. A value outside −2^63 … 2^63−1 throws a `RangeError` on encode (it used to be wrapped modulo 2^64, so `2n ** 64n + 5n` came back as `5n`).
 
 ### `date`
 
@@ -269,6 +271,8 @@ Wire format: 1-byte flag + data.
 ```ts
 const codec = proto(array(number()));
 ```
+
+An array whose items encode to zero bytes (`array(literal("x"))`, or an array of objects made only of literals) is refused by `proto()`: its length could not be checked against the input on decode.
 
 ### `tuple`
 
@@ -299,6 +303,8 @@ codec.encode("hello");  // variant index 0 + string
 codec.encode(42);       // variant index 1 + number
 ```
 
+Variants are tried in order and the first match wins, except for **object variants**: when a union has two or more, they are told apart by a field that is a `literal()` (or `picklist()`) with its own values in every variant, which is exactly what `discriminatedUnion()` requires. A union of objects with no such field is refused by `proto()`, because the encoder could not know which variant a value is. A union can contain `picklist()`, another `union`, or a `tuple`. `picklist()` is a union of literals, so it also holds at most 256 options.
+
 ### `literal`
 
 **0 bytes**: the value is known from the schema.
@@ -322,7 +328,11 @@ These throw: the codec requires full type information for a deterministic wire f
 | Validator lacks metadata | `"Validator has no schema metadata..."` |
 | Schema uses `any` or `unknown` | `"Cannot create protobuf codec for '<type>'..."` |
 | Union value matches no variant | `"Value does not match any union variant"` |
-| Malformed binary | Unpredictable (no bounds checking) |
+| Union of 2+ objects with no telling literal field | `"A union has N object variants and no literal field that tells them apart..."` (at `proto()`) |
+| Union or picklist with more than 256 variants | `"A union (or picklist) has N variants..."` (at `proto()`) |
+| Array of zero-byte items | `"Cannot create protobuf codec for an array whose items encode to zero bytes..."` (at `proto()`) |
+| `bigint` outside int64 | `RangeError` (on encode) |
+| Truncated, left-over or malformed bytes | `ProtoDecodeError` with `offset` |
 
 ---
 
@@ -380,14 +390,38 @@ function sendPoint(x: number, y: number) {
 ```ts
 const ClickEvent = object({ type: literal("click"), x: number(), y: number() });
 const KeyEvent = object({ type: literal("keyup"), key: string() });
-const Event = union([ClickEvent, KeyEvent]);
+const Event = discriminatedUnion("type", [ClickEvent, KeyEvent]); // union([...]) works too
 
 const codec = proto(Event);
 codec.encode({ type: "click" as const, x: 100, y: 200 });
 // Wire: 0x00 (variant 0) + flag(0) + varint(100) + flag(0) + varint(200)
+codec.encode({ type: "keyup" as const, key: "a" });
+// Wire: 0x01 (variant 1) + varint(1) + "a"
 ```
 
-> **Warning:** union variants are matched by type only, and every `object` variant matches any object. The first object variant always wins, so `codec.encode({ type: "keyup", key: "a" })` above is written as a `ClickEvent` and decodes as `{ type: "click", x: NaN, y: NaN }`. Until this is fixed, do not put more than one `object` variant in a union you encode with proto.
+The variant is chosen by `type`. In 0.1.32 and earlier the first object variant always won, so a `keyup` event came back as a `click`.
+
+### Decoding untrusted input
+
+`decode()` rejects bytes that are not a well-formed value, but it does not run the validator. For input from a client, decode and then validate:
+
+```ts
+import { proto, ProtoDecodeError } from "@coderbuzz/proto";
+import { object, string, decimal, isVetaError } from "@coderbuzz/veta";
+import { HttpError } from "@coderbuzz/velox";
+
+const Invoice = object({ ref: string({ max: 32 }), amount: decimal({ scale: 2 }) });
+const codec = proto(Invoice);
+
+function read(bytes: Uint8Array) {
+  try {
+    return Invoice(codec.decode(bytes)); // shape checked by decode, rules by the validator
+  } catch (err) {
+    if (err instanceof ProtoDecodeError || isVetaError(err)) throw new HttpError(400, "Invalid body");
+    throw err;
+  }
+}
+```
 
 ### Schema Validation + Binary Encoding
 
@@ -430,8 +464,8 @@ function encodeBatch(items: User[]): Uint8Array {
 
 ## Limitations
 
-- **Schema must be known at both ends**: cannot decode without exact schema
-- **No bounds checking on decode**: only decode trusted data
+- **Schema must be known at both ends**: cannot decode without exact schema. Nothing in the bytes identifies the schema, so data encoded with a different version (fields reordered or added) is misread, not rejected. Do not store proto bytes past a schema change
+- **Decode checks bytes, not rules**: run the validator on decoded untrusted input (see above)
 - **No streaming**: entire message in memory
 - **No CJS build**: ESM only
 - **Requires `@coderbuzz/veta`**: schema validators from veta are the only way to define codecs

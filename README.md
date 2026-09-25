@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@eeb7661 -->
+<!-- docs: sync from coderbuzz/codex@a7c7bb5 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -127,27 +127,40 @@ const size = codec.size({ name: "Bob", age: 25 });
 
 ## API Reference
 
-### `proto<T>(validator: (val: any, ctx?: any) => T): ProtoCodec<T>`
+### `proto<T>(validator, options?): ProtoCodec<T>`
 
 Compiles a binary codec from a veta schema validator. The validator must have `METADATA` attached (all veta validators do).
 
 ```ts
 const codec = proto(object({ x: number(), y: number() }));
+const stored = proto(Invoice, { header: true }); // bytes carry the schema fingerprint
 ```
+
+| Option | Default | Effect |
+|---|---|---|
+| `header` | `false` | Prefix every encoding with 5 bytes (version `1` + the schema fingerprint). `decode()` then refuses bytes written by a different schema, instead of misreading them. Both sides must use it |
 
 ### `ProtoCodec<T>`
 
 ```ts
 interface ProtoCodec<T> {
   encode(value: T): Uint8Array;
-  decode(buffer: Uint8Array): T;
+  decode(buffer: Uint8Array, options?: { validate?: boolean }): T;
   size(value: T): number;
+  readonly fingerprint: number;
 }
 ```
 
 #### `encode(value: T): Uint8Array`
 
 Encodes a value to compact binary. Returns a **copy** of the internal buffer.
+
+Every value is type-checked first: a missing number, a missing boolean, a string where a number belongs, or a wrong `literal()` throws `ProtoEncodeError` with the `path`, instead of being written as `NaN`, `false` or the schema's literal. `optional()` refuses `null` and `nullable()` refuses `undefined`, as the validators do. The check costs about 2% on encode.
+
+```ts
+codec.encode({ lines: [{ qty: "12abc" }] });
+// ProtoEncodeError: Expected number, got string at lines.0.qty
+```
 
 ```ts
 const bytes = codec.encode({ x: 10, y: 20 });
@@ -162,11 +175,21 @@ The bytes must be one complete, well-formed value: a truncated buffer, bytes lef
 ```ts
 const point = codec.decode(bytes);
 // => { x: 10, y: 20 }
+
+const safe = codec.decode(bytes, { validate: true }); // also runs the validator
 ```
+
+With `{ validate: true }`, the validator runs on the decoded value and its output is returned, so the schema's rules hold for untrusted input. It throws the validator's error. The validator must be synchronous, and must accept its own output: an `object().map()` reads keys its output no longer has, so validate that one yourself.
+
+An absent `optional()` field stays absent: it is not decoded as `key: undefined`, which matches veta's own output.
 
 #### `size(value: T): number`
 
-Calculates the encoded byte size **without encoding**. Exact match for `encode(value).length`. It allocates nothing for ASCII strings; a non-ASCII string is measured with `TextEncoder`.
+Calculates the encoded byte size **without encoding** or allocating. Exact match for `encode(value).length`. It does not type-check.
+
+#### `fingerprint: number`
+
+A 32-bit hash of the schema's wire layout: field names and order, types, union variants and literal values. The same schema gives the same number in every process and runtime, and any change to how bytes are read gives a different one. Use it in cache keys (`invoice:${codec.fingerprint}:${id}`), so a deploy with a new schema never reads old bytes.
 
 ```ts
 codec.size({ x: 10, y: 20 }); // exact byte count
@@ -190,6 +213,7 @@ codec.size({ x: 10, y: 20 }); // exact byte count
 | `tuple` | Items in order, no length prefix | 0 |
 | `optional`/`nullable`/`nullish` | 1-byte flag + value | 1 byte |
 | `union` | 1-byte variant index + value (at most 256 variants) | 1 byte |
+| `record` | `varint(count)` + key/value pairs | 1–5 bytes |
 | `literal` | 0 bytes | **0** |
 
 ### `object`
@@ -284,7 +308,7 @@ const codec = proto(tuple([string(), number(), boolean()]));
 
 ### `optional` / `nullable` / `nullish`
 
-1-byte presence flag + value if present. All three write `0x00` for both `null` and `undefined`, so `nullish` decodes `null` as `undefined`.
+1-byte presence flag + value if present. `optional()` accepts `undefined`, `nullable()` `null`, and `nullish()` both, as the validators do; the other one throws `ProtoEncodeError`. `nullish` writes `0x00` for both, so it decodes `null` as `undefined`. An absent `optional()` field is left out of the decoded object.
 
 ```ts
 // optional: 0x00 = undefined, 0x01 = value follows
@@ -304,6 +328,17 @@ codec.encode(42);       // variant index 1 + number
 ```
 
 Variants are tried in order and the first match wins, except for **object variants**: when a union has two or more, they are told apart by a field that is a `literal()` (or `picklist()`) with its own values in every variant, which is exactly what `discriminatedUnion()` requires. A union of objects with no such field is refused by `proto()`, because the encoder could not know which variant a value is. A union can contain `picklist()`, another `union`, or a `tuple`. `picklist()` is a union of literals, so it also holds at most 256 options.
+
+### `record`
+
+`varint(count)` + each key (encoded with the key schema) and value, in `Object.keys` order.
+
+```ts
+const Prices = record(picklist(["IDR", "USD"]), decimal({ scale: 2 }));
+proto(Prices).encode({ IDR: "15000.00", USD: "1.00" });
+```
+
+On decode, a `__proto__` key or a repeated key throws `ProtoDecodeError`. A record cannot share a union with an object variant, since nothing tells them apart.
 
 ### `literal`
 
@@ -332,7 +367,11 @@ These throw: the codec requires full type information for a deterministic wire f
 | Union or picklist with more than 256 variants | `"A union (or picklist) has N variants..."` (at `proto()`) |
 | Array of zero-byte items | `"Cannot create protobuf codec for an array whose items encode to zero bytes..."` (at `proto()`) |
 | `bigint` outside int64 | `RangeError` (on encode) |
+| Value of the wrong type (on encode) | `ProtoEncodeError` with `path`: `"Expected number, got string at lines.0.qty"` |
 | Truncated, left-over or malformed bytes | `ProtoDecodeError` with `offset` |
+| `{ header: true }` bytes from another schema | `ProtoDecodeError`: `"Schema fingerprint mismatch..."` |
+| `decode(..., { validate: true })` fails the rules | the validator's `VetaError` |
+| `decode(..., { validate: true })` on an async validator | `TypeError` |
 
 ---
 
@@ -403,7 +442,7 @@ The variant is chosen by `type`. In 0.1.32 and earlier the first object variant 
 
 ### Decoding untrusted input
 
-`decode()` rejects bytes that are not a well-formed value, but it does not run the validator. For input from a client, decode and then validate:
+`decode()` rejects bytes that are not a well-formed value, but it only checks the validator's rules with `{ validate: true }`. For input from a client, pass it:
 
 ```ts
 import { proto, ProtoDecodeError } from "@coderbuzz/proto";
@@ -415,7 +454,7 @@ const codec = proto(Invoice);
 
 function read(bytes: Uint8Array) {
   try {
-    return Invoice(codec.decode(bytes)); // shape checked by decode, rules by the validator
+    return codec.decode(bytes, { validate: true }); // bytes checked by decode, rules by the validator
   } catch (err) {
     if (err instanceof ProtoDecodeError || isVetaError(err)) throw new HttpError(400, "Invalid body");
     throw err;
@@ -464,8 +503,8 @@ function encodeBatch(items: User[]): Uint8Array {
 
 ## Limitations
 
-- **Schema must be known at both ends**: cannot decode without exact schema. Nothing in the bytes identifies the schema, so data encoded with a different version (fields reordered or added) is misread, not rejected. Do not store proto bytes past a schema change
-- **Decode checks bytes, not rules**: run the validator on decoded untrusted input (see above)
+- **Schema must be known at both ends**: cannot decode without exact schema. Without `{ header: true }`, nothing in the bytes identifies the schema, so data encoded with a different version (fields reordered) is misread, not rejected. With it, the mismatch throws. Neither makes old bytes readable by a new schema: there is no schema evolution, so do not store proto bytes past a schema change
+- **Decode checks bytes, not rules**, unless `{ validate: true }` (see above)
 - **No streaming**: entire message in memory
 - **No CJS build**: ESM only
 - **Requires `@coderbuzz/veta`**: schema validators from veta are the only way to define codecs

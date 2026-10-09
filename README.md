@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a7c7bb5 -->
+<!-- docs: sync from coderbuzz/codex@b6a0d29 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -338,7 +338,7 @@ const Prices = record(picklist(["IDR", "USD"]), decimal({ scale: 2 }));
 proto(Prices).encode({ IDR: "15000.00", USD: "1.00" });
 ```
 
-On decode, a `__proto__` key or a repeated key throws `ProtoDecodeError`. A record cannot share a union with an object variant, since nothing tells them apart.
+On decode, a `__proto__` key or a repeated key throws `ProtoDecodeError`. (An object schema that declares a `__proto__` field decodes it as an own key, as veta returns it.) A record cannot share a union with an object variant, since nothing tells them apart.
 
 ### `literal`
 

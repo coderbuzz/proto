@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@a7c7bb5 -->
+<!-- docs: sync from coderbuzz/codex@b6a0d29 -->
 
 # Proto: AI Agent Knowledge File
 
@@ -514,7 +514,8 @@ Metadata `{ type: 'record', key: TypeMeta, value: TypeMeta }` comes from veta's
 size)` before anything is read. A key `"__proto__"` throws `ProtoDecodeError`
 (`Record key "__proto__" is not allowed`: it would replace the result's
 prototype), and so does a repeated key (`Duplicate record key "a"`). The result
-is a plain `{}`.
+is a plain `{}`. An **object** whose shape declares `['__proto__']` (a fixed
+field, not input-chosen) decodes it as an own key, like veta's output.
 
 **Encode:** keys and values are type-checked; an error's path is the key
 (`Expected number, got string at IDR`). A picklist key outside its options

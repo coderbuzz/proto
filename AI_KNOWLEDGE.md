@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@5aee801 -->
+<!-- docs: sync from coderbuzz/codex@aa9c4da -->
 
 # Proto: AI Agent Knowledge File
 
@@ -776,12 +776,12 @@ codec.encode({ type: "keyup" as const, key: "a" });
 | `{id:1, name:"Ken", active:true}` | 35 B | 22 B | 7 B |
 | Benchmark nested object | 139 B | 111 B | 65 B |
 
-Benchmark throughput, source of truth `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (suite ids `proto-encode`, `proto-decode`, `proto-wire`): reference VM (Intel Xeon Platinum 8255C @ 2.50GHz, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-10 (benchmarks `6ed4ccf`). Best of 3 processes.
+Benchmark throughput, source of truth `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (suite ids `proto-encode`, `proto-decode`, `proto-wire`): cloud machine (Intel Xeon @ 2.80GHz, family 6 model 85 stepping 7, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-10 (benchmarks `f9601b4`). Best of 3 processes.
 
 | Operation | @coderbuzz/proto | @coderbuzz/msgpack | @msgpack/msgpack |
 |---|---|---|---|
-| Encode (ops/s) | **2,769,701** | 1,966,888 | 574,833 |
-| Decode (ops/s) | **1,497,858** | 1,149,180 | 543,204 |
+| Encode (ops/s) | **2,932,763** | 1,959,562 | 444,880 |
+| Decode (ops/s) | **905,331** | 839,657 | 412,165 |
 | Wire size | **65 B** | 111 B | 111 B |
 
 JSON is not a contender in that suite (an engine-native string, not bytes), so make no speed claim against it; its 139 B for the same object is an exact count. The earlier table (Apple M-series, with JSON) is superseded. Figures elsewhere in this file that say "measured" are local A/B measurements behind a design decision, taken on a developer machine; they explain a trade-off and are not benchmark claims. Quote speed only from the public results.

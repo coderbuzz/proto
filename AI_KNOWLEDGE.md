@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@b6a0d29 -->
+<!-- docs: sync from coderbuzz/codex@8854676 -->
 
 # Proto: AI Agent Knowledge File
 
@@ -689,8 +689,8 @@ const decoded = codec.decode(bytes);
 
 `codec.size(val)` computes the exact byte count without allocating (UTF-8
 lengths are counted from `charCodeAt`, a lone surrogate as 3 bytes like
-`TextEncoder`'s U+FFFD; 1.06–6.7× faster than measuring with `TextEncoder`
-for non-ASCII strings). It does not type-check. Use for:
+`TextEncoder`'s U+FFFD; measured locally 1.06–6.7× faster than measuring with
+`TextEncoder` for non-ASCII strings). It does not type-check. Use for:
 - Pre-allocating response buffers
 - Content-Length headers in streaming protocols
 - Estimating payload costs (e.g., bandwidth metering)
@@ -776,12 +776,15 @@ codec.encode({ type: "keyup" as const, key: "a" });
 | `{id:1, name:"Ken", active:true}` | 35 B | 22 B | 7 B |
 | Benchmark nested object | 139 B | 111 B | 65 B |
 
-Benchmark throughput (Apple M-series, Bun, from `coderbuzz/benchmarks`):
+Benchmark throughput, source of truth `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json` (suite ids `proto-encode`, `proto-decode`, `proto-wire`): cloud reference machine (Intel Xeon @ 2.10GHz, CPU model 207, 4 cores, Linux x64), Bun 1.4.2, run of 2026-10-10 (benchmarks `131fcc5`). Best of 3 processes.
 
-| Operation | JSON | @coderbuzz/proto | @coderbuzz/msgpack | @msgpack/msgpack |
-|---|---|---|---|---|
-| Encode (ops/s) | 6,892,630 | 4,694,891 | 3,275,386 | 1,323,117 |
-| Decode (ops/s) | 3,320,669 | 3,109,557 | 1,231,876 | 1,086,271 |
+| Operation | @coderbuzz/proto | @coderbuzz/msgpack | @msgpack/msgpack |
+|---|---|---|---|
+| Encode (ops/s) | **3,691,796** | 2,810,870 | 479,299 |
+| Decode (ops/s) | **1,322,623** | 1,243,521 | 682,013 |
+| Wire size | **65 B** | 111 B | 111 B |
+
+JSON is not a contender in that suite (an engine-native string, not bytes), so make no speed claim against it; its 139 B for the same object is an exact count. The earlier table (Apple M-series, with JSON) is superseded. Figures elsewhere in this file that say "measured" are local A/B measurements behind a design decision, taken on a developer machine; they explain a trade-off and are not benchmark claims. Quote speed only from the public results.
 
 The savings come from:
 1. **No field names**: unlike JSON/MessagePack

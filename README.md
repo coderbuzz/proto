@@ -1,4 +1,4 @@
-<!-- docs: sync from coderbuzz/codex@956f0b5 -->
+<!-- docs: sync from coderbuzz/codex@24a1da8 -->
 
 # Proto: `@coderbuzz/proto`
 
@@ -50,15 +50,15 @@ The result: **structured data smaller than Protobuf, smaller than MessagePack, a
 
 ## Benchmarks
 
-Numbers from [github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks) (`results/latest.json`): cloud machine (Intel Xeon @ 2.10GHz, family 6 model 207 stepping 2, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-10 (benchmarks `31fbcee`). @coderbuzz/proto 0.3.3 against @coderbuzz/msgpack 0.2.0 and @msgpack/msgpack 3.1.3 on one nested object (`{ id, name, active, tags[3], metadata: { createdAt, score } }`); ops/s, best of 3 processes, higher is better.
+Numbers from [github.com/coderbuzz/benchmarks](https://github.com/coderbuzz/benchmarks) (`results/latest.json`): cloud machine (Intel Xeon @ 2.80GHz, family 6 model 85 stepping 7, 4 cores, Linux x64), Bun 1.4.3, run of 2026-10-11 (benchmarks `d3093a2`). @coderbuzz/proto 0.3.3 against @coderbuzz/msgpack 0.2.0 and @msgpack/msgpack 3.1.3 on one nested object (`{ id, name, active, tags[3], metadata: { createdAt, score } }`); ops/s, best of 3 processes, higher is better.
 
 | Library | Wire size | Encode | Decode |
 |---|---|---|---|
-| **@coderbuzz/proto** | **65 bytes** | **3.44M ops/s** | **0.98M ops/s** |
-| @coderbuzz/msgpack | 111 bytes | 2.35M | 0.89M |
-| @msgpack/msgpack | 111 bytes | 0.46M | 0.49M |
+| **@coderbuzz/proto** | **65 bytes** | **2.44M ops/s** | **0.86M ops/s** |
+| @coderbuzz/msgpack | 111 bytes | 1.77M | 0.72M |
+| @msgpack/msgpack | 111 bytes | 0.43M | 0.44M |
 
-Proto is the smallest (41% below MessagePack) and the fastest of the three: encode 1.5x @coderbuzz/msgpack and 7.4x @msgpack/msgpack, decode 1.10x and 2.0x. The same object is 139 bytes as JSON, so proto is 53% smaller (an exact byte count, not a benchmark). JSON throughput is not in the public suite: `JSON.stringify` returns an engine-native string rather than bytes encoded in JavaScript, so it is not a like-for-like contender, and these docs make no speed claim against it.
+Proto is the smallest (41% below MessagePack) and the fastest of the three: encode 1.4x @coderbuzz/msgpack and 5.7x @msgpack/msgpack, decode 1.20x and 2.0x. The same object is 139 bytes as JSON, so proto is 53% smaller (an exact byte count, not a benchmark). JSON throughput is not in the public suite: `JSON.stringify` returns an engine-native string rather than bytes encoded in JavaScript, so it is not a like-for-like contender, and these docs make no speed claim against it.
 
 > Numbers move with the machine; compare them only within one run. The source of truth is `https://raw.githubusercontent.com/coderbuzz/benchmarks/main/results/latest.json`.
 
